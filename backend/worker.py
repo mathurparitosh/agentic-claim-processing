@@ -1,5 +1,5 @@
 from time import sleep
-from .db import get_connection
+from . import db
 
 
 def run_claim_agent(claim_id: str):
@@ -7,10 +7,9 @@ def run_claim_agent(claim_id: str):
 
     Replace this with the LangGraph run wiring later.
     """
-    conn = get_connection()
     import json
 
-    with conn:
+    with db.get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 "UPDATE claims SET status = %s, last_updated = now() WHERE id = %s",
@@ -22,9 +21,8 @@ def run_claim_agent(claim_id: str):
             )
     # simulate work (short sleep)
     sleep(0.5)
-    conn2 = get_connection()
-    with conn2:
-        with conn2.cursor() as cur:
+    with db.get_connection() as conn:
+        with conn.cursor() as cur:
             cur.execute(
                 "UPDATE claims SET status = %s, decision = %s, decision_reason = %s, last_updated = now() WHERE id = %s",
                 ("completed", "inconclusive", "placeholder-run", claim_id),

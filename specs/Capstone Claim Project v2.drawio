@@ -34,13 +34,13 @@
         <mxCell id="toolbox" parent="1" style="rounded=0;whiteSpace=wrap;html=1;dashed=1;fillColor=none;verticalAlign=top;fontStyle=1" value="Tool Layer" vertex="1">
           <mxGeometry height="180" width="510" x="400" y="470" as="geometry" />
         </mxCell>
-        <mxCell id="t_retrieval" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fontSize=9;" value="Retrieval&#xa;claim history · eligibility&#xa;prior auth · policy search&#xa;(Pinecone; k=20→GPT rerank→top3)" vertex="1">
+        <mxCell id="t_retrieval" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fontSize=9;" value="Retrieval&#xa;claim/dispute history&#xa;policy search&#xa;(Pinecone; k=20→GPT rerank→top3)" vertex="1">
           <mxGeometry height="65" width="150" x="420" y="510" as="geometry" />
         </mxCell>
-        <mxCell id="t_grounding" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fontSize=10;" value="Grounding&#xa;txn evidence · NPI verify&#xa;doc extract (+ citations)" vertex="1">
+        <mxCell id="t_grounding" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fontSize=10;" value="Grounding&#xa;txn evidence · cardholder verify&#xa;doc extract (+ citations)" vertex="1">
           <mxGeometry height="65" width="150" x="585" y="510" as="geometry" />
         </mxCell>
-        <mxCell id="t_compute" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fontSize=10;" value="Computation&#xa;date math · benefit calc&#xa;fee schedule variance" vertex="1">
+        <mxCell id="t_compute" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fontSize=10;" value="Computation&#xa;date math · duplicate-charge&#xa;detection · anomaly scoring" vertex="1">
           <mxGeometry height="65" width="145" x="750" y="510" as="geometry" />
         </mxCell>
         <mxCell id="t_human" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fontSize=10;fillColor=#ffe6cc;strokeColor=#d79b00;" value="ask_human&#xa;(retrieval of last resort)" vertex="1">
@@ -55,13 +55,13 @@
         <mxCell id="m_semantic" parent="1" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=10;fontSize=9;" value="Semantic&#xa;policy corpus, bulletins&#xa;(Pinecone, versioned)" vertex="1">
           <mxGeometry height="60" width="140" x="965" y="505" as="geometry" />
         </mxCell>
-        <mxCell id="m_episodic" parent="1" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=10;fontSize=9;" value="Episodic&#xa;entity facts keyed by NPI/member&#xa;(Postgres: episodic_facts, provenance-tagged)" vertex="1">
+        <mxCell id="m_episodic" parent="1" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=10;fontSize=9;" value="Episodic&#xa;entity facts keyed by account/cardholder&#xa;(Postgres: episodic_facts, provenance-tagged)" vertex="1">
           <mxGeometry height="60" width="140" x="965" y="575" as="geometry" />
         </mxCell>
         <mxCell id="human2" parent="1" style="shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;html=1;outlineConnect=0;" value="Processor" vertex="1">
           <mxGeometry height="55" width="30" x="336" y="585" as="geometry" />
         </mxCell>
-        <mxCell id="note_term" parent="1" style="shape=note;whiteSpace=wrap;html=1;size=14;align=left;verticalAlign=top;fontSize=10;fillColor=#fff2cc;strokeColor=#d6b656;" value="TERMINATION TEST — every iteration&#xa;&#xa;any FAIL → Deny (short-circuit)&#xa;all PASS → Approve&#xa;iter ≥ 12, or 3 no-progress iters,&#xa;or human budget spent → Inconclusive&#xa;&#xa;Decision is derived from the ledger,&#xa;never self-declared by the model." vertex="1">
+        <mxCell id="note_term" parent="1" style="shape=note;whiteSpace=wrap;html=1;size=14;align=left;verticalAlign=top;fontSize=10;fillColor=#fff2cc;strokeColor=#d6b656;" value="TERMINATION TEST — every iteration&#xa;&#xa;any FAIL → Deny (short-circuit)&#xa;all PASS → Approve&#xa;iter ≥ 12, or 5 no-progress iters,&#xa;or human budget spent → Inconclusive&#xa;&#xa;Decision is derived from the ledger,&#xa;never self-declared by the model." vertex="1">
           <mxGeometry height="140" width="230" x="870" y="80" as="geometry" />
         </mxCell>
         <mxCell id="note_pause" parent="1" style="shape=note;whiteSpace=wrap;html=1;size=12;align=left;verticalAlign=top;fontSize=9;fillColor=#ffe6cc;strokeColor=#d79b00;" value="ask_human suspends the loop.&#xa;State is serialized via the LangGraph&#xa;PostgresSaver checkpointer + Check&#xa;Ledger, and rehydrated on resume —&#xa;hours or days later. Frontend polls&#xa;FastAPI for pending questions." vertex="1">

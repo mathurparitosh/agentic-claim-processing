@@ -45,19 +45,20 @@ Derived from `specs/Capstone Claim Project v2.drawio`.
 - **Audit Trail** — append-only log of every agent step, tool call, retrieval detail,
   and final determination + basis. Postgres.
 - **Tool Layer**
-  - Retrieval tools (claim history, eligibility, prior auth, policy search)
-  - Grounding tools (transaction evidence, NPI verification, document extraction with
-    citations)
-  - Computation tools (date math, benefit calculation, fee-schedule variance)
+  - Retrieval tools (claim/dispute history, policy search)
+  - Grounding tools (transaction evidence, account/cardholder verification, document
+    extraction with citations)
+  - Computation tools (date math, duplicate-charge detection, transaction-pattern
+    anomaly scoring)
   - `ask_human` (suspends the run; last-resort retrieval)
   - `write_determination` (single irreversible write of the final decision)
 - **Long-Term Memory**
   - Semantic — policy/regulation corpus, versioned, stored in Pinecone as embeddings.
-  - Episodic — entity facts (keyed by NPI/member), provenance-tagged, so previously
-    verified facts can be reused across claims. Stored as a Postgres table (`episodic_facts`
-    or similar), keyed by entity ID, each row carrying the fact, its source
-    (claim/tool that established it), and a timestamp — a keyed-lookup access pattern,
-    not similarity search, so it belongs in Postgres rather than Pinecone.
+  - Episodic — entity facts (keyed by account/cardholder), provenance-tagged, so
+    previously verified facts can be reused across claims. Stored as a Postgres table
+    (`episodic_facts` or similar), keyed by entity ID, each row carrying the fact, its
+    source (claim/tool that established it), and a timestamp — a keyed-lookup access
+    pattern, not similarity search, so it belongs in Postgres rather than Pinecone.
 
 ### Memory-to-store mapping
 
@@ -69,7 +70,7 @@ each to an actual store in this stack:
 | Short-term — agent state | Raw Think/Act/Observe trajectory (messages, tool calls) for the in-progress claim; enables resume after `ask_human` | LangGraph `PostgresSaver` checkpointer |
 | Short-term — check state | Structured PASS/FAIL/UNKNOWN/BLOCKED per required check; what the final decision is derived from | Check Ledger (Postgres table) |
 | Long-term — semantic | Policy/regulation corpus, versioned | Pinecone (vector store, similarity search) |
-| Long-term — episodic | Entity facts keyed by NPI/member, provenance-tagged | `episodic_facts` (Postgres table, keyed lookup) |
+| Long-term — episodic | Entity facts keyed by account/cardholder, provenance-tagged | `episodic_facts` (Postgres table, keyed lookup) |
 
 All four now live in this stack — no memory type from requirements.md §7 is
 unassigned.
@@ -86,7 +87,61 @@ unassigned.
 - Retrieval calls (query, filters, full candidate list, scores) are logged to the
   audit trail for later audit review, not just the final top-3 used.
 
-## 4. Open / To-Be-Decided
+## 4. Claim Taxonomy (Phase 4)
 
-All previously open items now have a decision (§1). Nothing outstanding at this time —
-revisit this section as implementation surfaces new gaps.
+requirements.md §4 says the checks that apply are "determined only after reading the
+claim" but doesn't enumerate claim types or checks. This section is that enumeration —
+the concrete mapping the LangGraph agent, synthetic-data fixtures, and (later) the
+Phase 8 eval set are all built against. Two claim types, matching requirements.md §1's
+"billing dispute or fraud claims" framing.
+
+Each check is deterministically required for its claim type (looked up by
+`claim_type`, not LLM-inferred) — the check *ledger* is initialized with all required
+checks at UNKNOWN when a run starts. What the ReAct loop actually reasons about is
+*which tool to call next* to resolve each still-UNKNOWN/BLOCKED check, not which
+checks apply in the first place. This keeps "classification" auditable/deterministic
+rather than a model judgment call, consistent with requirements.md §13's
+determinism-of-decisioning requirement.
+
+### `billing_dispute`
+
+| Check | Tool category | Resolves by |
+|---|---|---|
+| `transaction_exists` | Grounding | Disputed transaction is found in the account's transaction history |
+| `duplicate_charge_check` | Computation | Same amount/merchant charged twice within a short window (only decisive when dispute reason is `duplicate_charge`) |
+| `policy_dispute_window` | Retrieval + Computation | Retrieve the applicable dispute-filing-window policy; compute whether the claim was filed within that window |
+| `account_standing` | Grounding | Account is not already flagged for dispute-process abuse |
+
+### `fraud`
+
+| Check | Tool category | Resolves by |
+|---|---|---|
+| `account_red_flags` | Grounding | Existing fraud/red-flag signals already on the account |
+| `transaction_pattern_anomaly` | Grounding + Computation | Disputed transaction checked against the account's history for velocity/amount/location anomalies |
+| `system_access_log_check` | Grounding | Suspicious login/device activity in the access logs around the transaction time |
+| `policy_liability_rule` | Retrieval | Retrieve the applicable fraud-liability regulation/policy to ground the decision |
+
+### Synthetic data fixture tables (Postgres)
+
+Backing the Grounding tools above — synthetic, not real customer data (requirements.md
+§3):
+
+- `transactions` — per-account transaction history (amount, merchant, location,
+  channel, status, timestamp).
+- `access_logs` — per-account system/login/device event history.
+- `account_profiles` — per-account standing, existing fraud red-flags, dispute
+  history count.
+
+### Retrieval tool status
+
+Wired to the real Pinecone index (`claims-policy-corpus`) end-to-end rather than
+stubbed — since Phase 3 (RAG ingestion) hasn't loaded any policy documents yet, the
+index currently has 0 vectors, so retrieval calls honestly return zero results. This
+is the documented, valid "no matching policy found" outcome (requirements.md §9), and
+means `policy_dispute_window` / `policy_liability_rule` will resolve UNKNOWN/BLOCKED
+until Phase 3 lands — no retrieval code changes needed once it does.
+
+## 5. Open / To-Be-Decided
+
+All previously open items now have a decision (§1, §4). Nothing outstanding at this
+time — revisit this section as implementation surfaces new gaps.

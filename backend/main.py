@@ -2,7 +2,7 @@ from fastapi import FastAPI, BackgroundTasks
 from pydantic import BaseModel
 from uuid import uuid4
 
-from .db import test_connection, get_connection
+from . import db
 from . import worker
 
 app = FastAPI()
@@ -10,7 +10,13 @@ app = FastAPI()
 
 @app.on_event("startup")
 def startup_event():
-    test_connection()
+    db.open_pool()
+    db.test_connection()
+
+
+@app.on_event("shutdown")
+def shutdown_event():
+    db.close_pool()
 
 
 class ClaimIn(BaseModel):
@@ -30,8 +36,7 @@ def create_claim(claim: ClaimIn, background_tasks: BackgroundTasks):
     import json
 
     # insert into claims
-    conn = get_connection()
-    with conn:
+    with db.get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """

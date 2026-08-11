@@ -162,10 +162,10 @@ model's own unverified inference.
 - Persistent knowledge shared across all claims/sessions, not tied to one case.
 - **Semantic memory** — the policy/regulation corpus (bulletins, procedures, letter
   templates), held in a versioned vector store and retrieved via similarity search.
-- **Episodic memory** — facts about recurring entities (e.g., a given NPI or member),
-  tagged with their provenance (which claim/tool established the fact), so previously
-  verified information doesn't need to be re-derived from scratch on the next claim
-  touching the same entity.
+- **Episodic memory** — facts about recurring entities (e.g., a given account or
+  cardholder), tagged with their provenance (which claim/tool established the fact),
+  so previously verified information doesn't need to be re-derived from scratch on
+  the next claim touching the same entity.
 - Critical facts obtained early in a run (e.g., the governing regulation identified
   in iteration 1) must not be silently dropped by summarization or context-window
   eviction — long-term storage exists specifically to protect against that failure
@@ -175,9 +175,9 @@ model's own unverified inference.
 
 | Tool category | Purpose | Addresses |
 |---|---|---|
-| **Retrieval** | Claim history, eligibility, prior authorization, policy/regulation search | Retrieval limitation — LLM has no access to current/private data |
-| **Grounding** | Transaction evidence lookup, NPI verification, document extraction with citations | Grounding limitation — claims must be tied to a checkable, citable fact |
-| **Computation** | Date math, benefit calculation, fee-schedule variance | Computation limitation — LLMs are unreliable at precise arithmetic |
+| **Retrieval** | Claim/dispute history, policy/regulation search | Retrieval limitation — LLM has no access to current/private data |
+| **Grounding** | Transaction evidence lookup, account/cardholder verification, document extraction with citations | Grounding limitation — claims must be tied to a checkable, citable fact |
+| **Computation** | Date math, duplicate-charge detection, transaction-pattern anomaly scoring | Computation limitation — LLMs are unreliable at precise arithmetic |
 | **ask_human** | Retrieval of last resort when no tool can supply required information | Retrieval limitation, human judgment gap |
 | **write_determination** | Writes the final decision + basis back to the Claims DB | Single irreversible action — deliberately isolated as the only write |
 

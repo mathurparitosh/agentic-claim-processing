@@ -3,8 +3,10 @@ uvicorn[standard]
 langgraph
 langgraph-checkpoint-postgres
 langchain-openai
+openai
 pinecone
 psycopg[binary]
+psycopg_pool
 python-dotenv
 langsmith
 unstructured

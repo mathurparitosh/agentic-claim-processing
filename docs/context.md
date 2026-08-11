@@ -94,5 +94,48 @@ Suggested short prompts to hand off:
 
 
 ---
-
 If you want I can also add a short README entry documenting how to hand off to Claude or create a workflow checklist. Tell me which assistant you want to work with next (Claude or me).
+
+
+## Recent Activity
+
+- Date: 2026-08-10
+- Commit: `feat(api): add POST /claims endpoint with background worker; update tracker` (local commit)
+- Commit hash: `8305bfa` (local)
+
+Summary of what changed in this commit:
+
+- Implemented `POST /claims` endpoint in `backend/main.py` that persists a new claim and enqueues a background job via FastAPI `BackgroundTasks`.
+- Added `backend/worker.py` — a placeholder background worker that updates claim status and writes `audit_trail` entries (placeholder for LangGraph wiring).
+- Created `backend/db.py` (DB helper) and verified the DB connection against the local Postgres `claims_dev` database.
+- Created and applied `schema.sql` (tables: `claims`, `check_ledger`, `audit_trail`, `episodic_facts`).
+- Updated `specs/tracker.md` to mark Phase 1/2 and the `POST /claims`/BackgroundTasks items completed.
+
+How I tested the change locally (quick reproducible steps):
+
+```bash
+# start local Postgres (if not already running)
+docker compose up -d postgres
+
+# activate backend venv
+cd backend
+source .venv/bin/activate
+
+# run a quick test using the FastAPI TestClient (this is what I ran):
+python - <<'PY'
+from fastapi.testclient import TestClient
+from backend.main import app
+
+client = TestClient(app)
+resp = client.post('/claims', json={'claim_type':'test','claim_payload':{'foo':'bar'}})
+print('POST /claims ->', resp.status_code, resp.json())
+PY
+```
+
+Expected result: a JSON response with `claim_id` and `status: pending`; after the background worker runs the claim row is updated to `status: completed` and a `decision` is set to `inconclusive` (placeholder behavior).
+
+Notes and next steps:
+
+- Replace the placeholder `worker.run_claim_agent` with the LangGraph orchestrator wiring and `PostgresSaver` checkpointing.
+- Add `GET /claims/{id}` and the `ask_human` question/answer endpoints.
+- Optionally, add integration tests that run the full agent graph (mocked) against sample claims.
