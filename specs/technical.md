@@ -109,7 +109,7 @@ determinism-of-decisioning requirement.
 |---|---|---|
 | `transaction_exists` | Grounding | Disputed transaction is found in the account's transaction history |
 | `duplicate_charge_check` | Computation | Same amount/merchant charged twice within a short window (only decisive when dispute reason is `duplicate_charge`) |
-| `policy_dispute_window` | Retrieval + Computation | Retrieve the applicable dispute-filing-window policy; compute whether the claim was filed within that window |
+| `policy_dispute_window` | Retrieval | Retrieve the applicable dispute-filing-window policy; a retrieved, citable policy satisfies the check (see note below — a real day-count comparison against the claim's filed date is deferred) |
 | `account_standing` | Grounding | Account is not already flagged for dispute-process abuse |
 
 ### `fraud`
@@ -138,8 +138,23 @@ Wired to the real Pinecone index (`claims-policy-corpus`) end-to-end rather than
 stubbed — since Phase 3 (RAG ingestion) hasn't loaded any policy documents yet, the
 index currently has 0 vectors, so retrieval calls honestly return zero results. This
 is the documented, valid "no matching policy found" outcome (requirements.md §9), and
-means `policy_dispute_window` / `policy_liability_rule` will resolve UNKNOWN/BLOCKED
-until Phase 3 lands — no retrieval code changes needed once it does.
+means `policy_dispute_window` / `policy_liability_rule` will resolve BLOCKED until
+Phase 3 lands — no retrieval code changes needed once it does.
+
+Both retrieval-only checks close **only** via `search_policy`'s own result: BLOCKED if
+it returns zero candidates, PASS (with the retrieved clause as citation) if it returns
+any. Neither check has a computation step that applies the retrieved clause's actual
+text (e.g. extracting its stated day-count window and comparing against the claim's
+filed date) — that's deferred pending Phase 3 tagging policy chunks with structured
+metadata (e.g. a `window_days` field) to compute against. **This is deliberate, not an
+oversight**: an earlier version gave the model a separate tool that took a
+`window_days` argument directly from the model, intending the model to use the number
+from a retrieved clause — instead the model supplied a plausible-sounding day count
+from its own training knowledge without ever calling `search_policy` first, closing
+`policy_dispute_window` on an ungrounded guess. Found via the Phase 5 end-to-end test
+(a `billing_dispute` claim resolved `policy_dispute_window` to PASS with
+`window_days: 60` despite Pinecone having 0 vectors). Removed that tool; a check able
+to close only through an actual retrieval hit can't be bypassed this way.
 
 ## 5. Open / To-Be-Decided
 

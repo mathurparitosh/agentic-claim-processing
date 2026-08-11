@@ -8,7 +8,7 @@ retrieval honestly returns zero results (a valid outcome per requirements.md §9
 stub.
 """
 import os
-from datetime import date, datetime, timezone
+from datetime import date, datetime
 from decimal import Decimal
 
 from langchain_core.tools import tool
@@ -203,20 +203,6 @@ def check_transaction_anomaly(account_id: str, transaction_ref: str) -> dict:
     return {"anomalous": bool(reasons), "reasons": reasons, "average_amount": round(avg_amount, 2)}
 
 
-@tool
-def check_dispute_window(filed_at: str, transaction_occurred_at: str, window_days: int) -> dict:
-    """Computation tool. Date math: is filed_at within window_days of transaction_occurred_at?
-    Both are ISO 8601 timestamps/dates."""
-    filed = datetime.fromisoformat(filed_at)
-    occurred = datetime.fromisoformat(transaction_occurred_at)
-    if filed.tzinfo is None:
-        filed = filed.replace(tzinfo=timezone.utc)
-    if occurred.tzinfo is None:
-        occurred = occurred.replace(tzinfo=timezone.utc)
-    days_elapsed = (filed - occurred).days
-    return {"within_window": 0 <= days_elapsed <= window_days, "days_elapsed": days_elapsed}
-
-
 # ---- Retrieval ---------------------------------------------------------------
 
 
@@ -285,7 +271,6 @@ TOOLS = [
     lookup_access_logs,
     check_duplicate_charge,
     check_transaction_anomaly,
-    check_dispute_window,
     search_policy,
     ask_human,
     write_determination,

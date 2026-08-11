@@ -21,7 +21,7 @@ from openai import OpenAI  # noqa: E402
 
 from . import db  # noqa: E402
 
-MODEL = "gpt-4.1"
+MODEL = "gpt-5.6-luna"
 
 RESPONSE_SCHEMA_DESCRIPTION = """
 Return a JSON object with exactly these keys:
@@ -118,7 +118,9 @@ def generate_scenario(scenario: dict) -> dict:
     )
     resp = client.chat.completions.create(
         model=MODEL,
-        temperature=0.4,
+        # No `temperature`: gpt-5.6-luna is a reasoning model and rejects any non-default
+        # value outright (was 0.4, for variety across generated scenarios -- no longer
+        # controllable with this model).
         response_format={"type": "json_object"},
         messages=[
             {"role": "system", "content": "You generate realistic synthetic test data for a claims-processing capstone project. Never use real people or real account data."},

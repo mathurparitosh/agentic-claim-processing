@@ -22,7 +22,21 @@ MAX_ITERATIONS = 12
 NO_PROGRESS_LIMIT = 5
 
 TOOLS_BY_NAME = {t.name: t for t in TOOLS}
-MODEL = ChatOpenAI(model="gpt-4.1", temperature=0).bind_tools(TOOLS, tool_choice="required")
+# parallel_tool_calls=False: requirements.md §5 step 2 -- Act takes *one* action per
+# turn. This also sidesteps a real LangGraph interrupt hazard: if a turn's tool_calls
+# included e.g. lookup_transaction *and* ask_human, resuming after the ask_human pause
+# re-runs the whole node from the top, re-executing lookup_transaction's DB writes and
+# producing a duplicate audit_trail row. With exactly one tool call per turn, ask_human
+# (when chosen) has no side effects ahead of it in the same node call, so resume is safe.
+# use_responses_api=True: gpt-5.6-luna is a reasoning model -- the default /v1/chat/completions
+# endpoint rejects function tools together with reasoning ("use /v1/responses or set
+# reasoning_effort to 'none'"). Responses API keeps reasoning intact rather than disabling it.
+# No `temperature` here: reasoning models reject any non-default value outright (confirmed
+# directly against both /v1/chat/completions and /v1/responses) -- langchain_openai was
+# silently dropping temperature=0 rather than raising, which would have been misleading.
+MODEL = ChatOpenAI(model="gpt-5.6-luna", use_responses_api=True).bind_tools(
+    TOOLS, tool_choice="required", parallel_tool_calls=False
+)
 
 
 class ClaimState(TypedDict):
@@ -145,16 +159,16 @@ def _derive_check_updates(claim_type: str, tool_name: str, args: dict, result: d
         if target in checks:
             if not result.get("results"):
                 updates.append((target, "BLOCKED", {"note": "no matching policy found", "query": result.get("query")}))
-            elif claim_type == "fraud":
-                # No further computation step applies the liability-rule text; a retrieved,
-                # citable governing policy is treated as satisfying this check (documented
-                # simplification, specs/technical.md §4). billing_dispute's
-                # policy_dispute_window instead waits on a check_dispute_window call to
-                # actually apply the retrieved filing window.
+            else:
+                # No computation step applies the retrieved clause's actual text (e.g. its
+                # stated filing-window day count) -- a retrieved, citable governing policy
+                # is treated as satisfying this check (documented simplification,
+                # specs/technical.md §4). This is deliberately the *only* way either
+                # retrieval-only check can PASS: an earlier version let the model supply a
+                # filing-window day count itself via a separate tool, and it did -- with a
+                # number from its own training knowledge, never having called search_policy
+                # at all. Retrieval-only checks must only close via an actual retrieval hit.
                 updates.append((target, "PASS", {"citations": result.get("results")}))
-
-    elif tool_name == "check_dispute_window" and "policy_dispute_window" in checks:
-        updates.append(("policy_dispute_window", "PASS" if result.get("within_window") else "FAIL", result))
 
     elif tool_name == "ask_human":
         check_name = args.get("check_name")

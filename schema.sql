@@ -8,6 +8,9 @@ CREATE TABLE IF NOT EXISTS claims (
     status TEXT NOT NULL DEFAULT 'pending',
     decision TEXT,
     decision_reason TEXT,
+    -- Set while status = 'awaiting_input': {"question": ..., "check_name": ...} from
+    -- the ask_human tool's interrupt payload (backend/agent/tools.py). Cleared on answer.
+    pending_question JSONB,
     last_updated TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
