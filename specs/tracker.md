@@ -21,7 +21,7 @@ Do all of this first — nothing in Phase 1+ can run without these keys/services
 - [x] 🌐 Sign up / log in at platform.openai.com
 - [x] 🌐 Add a payment method under **Billing → Payment methods** (API calls fail without one) — confirm this is done
 - [x] 🌐 Create an API key under **API keys → Create new secret key** — copy it immediately, it's shown once
-  - ⚠️ `OPENAI_API_KEY` in `.env.local` currently holds the **LangSmith** key value (`lsv2_pt_...` prefix) instead of an actual OpenAI key (`sk-...` prefix) — go back to the OpenAI dashboard and copy the real key in before Phase 3+.
+  - ⚠️ Confirm `OPENAI_API_KEY` uses a valid OpenAI key (`sk-...` prefix) and `LANGSMITH_API_KEY` uses the LangSmith key prefix (`lsv2_pt_...`).
 - [x] 🌐 Set a usage limit/budget alert under **Billing → Limits** (recommended, not required)
 
 ### Pinecone (semantic memory / policy corpus)
@@ -44,22 +44,23 @@ Do all of this first — nothing in Phase 1+ can run without these keys/services
 - [x] 🌐 Decide: access via server IP, or point an existing domain at it (optional — not required to ship)
 
 ### Version control (recommended, not strictly required)
-- [ ] 🌐 Create a GitHub (or other git host) repo — makes it far easier to get code onto the Ubuntu server later
-- [ ] 💻 `git init` in this project directory (currently **not** a git repo)
-- [ ] 💻 Add a `.gitignore` (`.env`, `__pycache__/`, `node_modules/`, `*.pyc`, etc.)
+- [x] 🌐 Create a GitHub (or other git host) repo — makes it far easier to get code onto the Ubuntu server later
+- [x] 💻 `git init` in this project directory
+- [x] 💻 Add a `.gitignore` (`.env`, `__pycache__/`, `node_modules/`, `*.pyc`, etc.)
 
 ### Local dev tooling
-- [ ] 🌐 Install Docker Desktop (or Docker Engine) locally — for a local Postgres instance during development. This is a one-time installer download, no account required.
+- [x] 🌐 Install Docker Desktop (or Docker Engine) locally — for a local Postgres instance during development. This is a one-time installer download, no account required.
 - [ ] 🌐 Install Node.js (LTS) and Python 3.11+ locally if not already present
 
 ---
 
 ## Phase 1 — Project Scaffolding
 
-- [ ] 💻 Create `backend/` and `frontend/` folders
-- [ ] 💻 Python virtualenv in `backend/`; install: `fastapi uvicorn[standard] langgraph langgraph-checkpoint-postgres langchain-openai pinecone psycopg[binary] python-dotenv langsmith unstructured`
-- [ ] 💻 Scaffold React app in `frontend/` (Vite)
-- [ ] 💻 `docker-compose.yml` with a local Postgres service for dev (mirrors the prod Postgres engine)
+- [x] 💻 Create `backend/` and `frontend/` folders
+- [x] 💻 Python virtualenv in `backend/`; install: `fastapi uvicorn[standard] langgraph langgraph-checkpoint-postgres langchain-openai pinecone psycopg[binary] python-dotenv langsmith unstructured`
+- [x] 💻 Scaffold React app in `frontend/` (Vite)
+- [x] 💻 Validate frontend scaffold with `npm install` and `npm run build`
+- [x] 💻 `docker-compose.yml` with a local Postgres service for dev (mirrors the prod Postgres engine)
 - [x] 💻 `.env.example` / `.env.local` listing every required variable:
   - `OPENAI_API_KEY`
   - `PINECONE_API_KEY`, `PINECONE_INDEX`
@@ -67,14 +68,13 @@ Do all of this first — nothing in Phase 1+ can run without these keys/services
   - `DATABASE_URL`
   - `AUTH_PASSWORD` (shared-password gate)
 - [ ] 💻 Fill in remaining real values from Phase 0 (Pinecone, DB, auth password) — never commit `.env.local`
-- [ ] 💻 Add `.env.local` to `.gitignore` before the first `git init`/commit (project isn't a git repo yet)
 
 ---
 
 ## Phase 2 — Data Layer (Postgres)
 
-- [ ] 💻 Write `schema.sql`: `claims`, `check_ledger`, `audit_trail`, `episodic_facts` tables (per technical.md's memory-to-store mapping)
-- [ ] 💻 Apply `schema.sql` to local dev Postgres (via `docker compose up` + `psql`)
+- [x] 💻 Write `schema.sql`: `claims`, `check_ledger`, `audit_trail`, `episodic_facts` tables (per technical.md's memory-to-store mapping)
+- [x] 💻 Apply `schema.sql` to local dev Postgres (via `docker compose up` + `psql`)
 - [ ] 💻 Confirm LangGraph's `PostgresSaver.setup()` creates its own checkpointer tables against the same DB
 - [ ] 💻 Small `db.py` connection helper shared by the API and agent code
 
@@ -105,6 +105,8 @@ Do all of this first — nothing in Phase 1+ can run without these keys/services
 
 - [ ] 💻 Endpoints: `POST /claims`, `GET /claims/{id}`, `GET /claims/{id}/questions`, `POST /claims/{id}/answer`, `GET /claims/{id}/decision`
 - [ ] 💻 Wire claim submission to `BackgroundTasks` running the LangGraph agent (per technical.md's Background Execution row)
+- [x] 💻 Endpoints: `POST /claims` (implemented), `GET /claims/{id}`, `GET /claims/{id}/questions`, `POST /claims/{id}/answer`, `GET /claims/{id}/decision`
+- [x] 💻 Wire claim submission to `BackgroundTasks` running the LangGraph agent (per technical.md's Background Execution row)
 - [ ] 💻 Shared-password auth middleware on the API
 - [ ] 💻 End-to-end local test via curl/HTTP: submit → poll status → answer a question if one comes up → see final decision
 
