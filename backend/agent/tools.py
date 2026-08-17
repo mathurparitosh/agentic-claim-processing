@@ -3,9 +3,7 @@ write_determination.
 
 Grounding/Computation tools read the synthetic fixture tables (`transactions`,
 `access_logs`, `account_profiles`) -- see specs/technical.md §4. Retrieval queries the
-real Pinecone index; until Phase 3 ingests policy documents the index is empty, so
-retrieval honestly returns zero results (a valid outcome per requirements.md §9), not a
-stub.
+real Qdrant collection (`scripts/ingest_policy_corpus.py`, Phase 3).
 """
 import os
 from datetime import date, datetime
@@ -14,15 +12,19 @@ from decimal import Decimal
 from langchain_core.tools import tool
 from langgraph.types import interrupt
 from openai import OpenAI
-from pinecone import Pinecone
+from qdrant_client import QdrantClient, models
 
 from .. import db
 
 _openai_client = None
-_pinecone_index = None
+_qdrant_client = None
 
 HUMAN_QUESTION_BUDGET = 3
-RELEVANCE_FLOOR = 0.75
+# Calibrated against the real policy corpus (scripts/ingest_policy_corpus.py) with
+# text-embedding-3-small cosine scores: genuinely relevant clauses land ~0.55-0.68,
+# off-topic queries ~0.06-0.08. The original 0.75 predates any real data in the
+# index (Pinecone was always empty) and silently discarded every correct match.
+RELEVANCE_FLOOR = 0.5
 
 
 def _jsonable(value):
@@ -45,12 +47,13 @@ def _openai() -> OpenAI:
     return _openai_client
 
 
-def _pinecone_index_client():
-    global _pinecone_index
-    if _pinecone_index is None:
-        pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
-        _pinecone_index = pc.Index(os.getenv("PINECONE_INDEX"))
-    return _pinecone_index
+def _qdrant() -> QdrantClient:
+    global _qdrant_client
+    if _qdrant_client is None:
+        _qdrant_client = QdrantClient(
+            url=os.getenv("QDRANT_URL"), api_key=os.getenv("QDRANT_API_KEY")
+        )
+    return _qdrant_client
 
 
 # ---- Grounding -------------------------------------------------------------
@@ -212,18 +215,25 @@ def search_policy(query: str, claim_type: str) -> dict:
     text governing this claim type. Returns up to 3 relevant clauses with citations, or
     zero results if nothing clears the relevance floor -- 'no matching policy found' is a
     valid, honest outcome, not an error."""
-    index = _pinecone_index_client()
     embedding = _openai().embeddings.create(model="text-embedding-3-small", input=query).data[0].embedding
-    raw = index.query(vector=embedding, top_k=20, include_metadata=True, filter={"claim_type": claim_type})
+    raw = _qdrant().query_points(
+        collection_name=os.getenv("QDRANT_COLLECTION", "claims-policy-corpus"),
+        query=embedding,
+        limit=20,
+        query_filter=models.Filter(
+            must=[models.FieldCondition(key="claim_type", match=models.MatchValue(value=claim_type))]
+        ),
+        with_payload=True,
+    )
 
     candidates = [
         {
-            "id": m.id,
-            "score": m.score,
-            "text": (m.metadata or {}).get("text"),
-            "citation": (m.metadata or {}).get("citation"),
+            "id": str(p.id),
+            "score": p.score,
+            "text": (p.payload or {}).get("text"),
+            "citation": (p.payload or {}).get("citation"),
         }
-        for m in raw.matches
+        for p in raw.points
     ]
     top = sorted((c for c in candidates if c["score"] >= RELEVANCE_FLOOR), key=lambda c: -c["score"])[:3]
 

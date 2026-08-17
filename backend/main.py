@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 from . import db
 from . import worker
+from .agent import ledger
 
 app = FastAPI()
 
@@ -76,6 +77,9 @@ def create_claim(claim: ClaimIn, background_tasks: BackgroundTasks):
                 """,
                 (claim_id, claim.claim_type, json.dumps(claim.claim_payload)),
             )
+    ledger.log_audit(
+        claim_id, "claim_submitted", {"claim_type": claim.claim_type, "claim_payload": claim.claim_payload}, "human"
+    )
     background_tasks.add_task(worker.run_claim_agent, claim_id)
     return {"claim_id": claim_id, "status": "pending"}
 
@@ -93,6 +97,35 @@ def list_claims(limit: int = 50):
                 FROM claims ORDER BY submitted_at DESC LIMIT %s
                 """,
                 (limit,),
+            )
+            return cur.fetchall()
+
+
+@claims_router.get("/accounts")
+def list_accounts():
+    """Sample accounts available in the synthetic fixture data -- backs the claim
+    form's account-ID autocomplete so the processor picks a real account instead of
+    typing one blind."""
+    with db.get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT account_id, member_name FROM account_profiles ORDER BY account_id"
+            )
+            return cur.fetchall()
+
+
+@claims_router.get("/accounts/{account_id}/transactions")
+def list_account_transactions(account_id: str):
+    """Transactions for one account -- backs the claim form's disputed-transaction
+    dropdown, populated once an account is picked."""
+    with db.get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT transaction_ref, occurred_at, amount, merchant, location, channel, status
+                FROM transactions WHERE account_id = %s ORDER BY occurred_at
+                """,
+                (account_id,),
             )
             return cur.fetchall()
 
@@ -120,6 +153,71 @@ def get_claim(claim_id: str):
             checks = cur.fetchall()
 
     return {**claim, "checks": checks}
+
+
+@claims_router.get("/claims/{claim_id}/context")
+def get_context(claim_id: str):
+    """Account profile + disputed transaction detail for the claim's own account_id /
+    disputed_transaction_id (claim_payload), for the frontend's Account & Transaction
+    tab (requirements.md §11). Read-only lookup against the same fixture tables the
+    Grounding tools query -- this is a display convenience, not a tool call, so it
+    doesn't touch the check ledger or audit trail."""
+    with db.get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT claim_payload FROM claims WHERE id = %s", (claim_id,))
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="claim not found")
+
+            account_id = row["claim_payload"].get("account_id")
+            transaction_ref = row["claim_payload"].get("disputed_transaction_id")
+
+            account = None
+            if account_id:
+                cur.execute(
+                    """
+                    SELECT account_id, member_name, opened_at, standing, fraud_red_flags, dispute_history_count
+                    FROM account_profiles WHERE account_id = %s
+                    """,
+                    (account_id,),
+                )
+                account = cur.fetchone()
+
+            transaction = None
+            if account_id and transaction_ref:
+                cur.execute(
+                    """
+                    SELECT transaction_ref, occurred_at, amount, merchant, location, channel, status
+                    FROM transactions WHERE account_id = %s AND transaction_ref = %s
+                    """,
+                    (account_id, transaction_ref),
+                )
+                transaction = cur.fetchone()
+
+    return {"account": account, "transaction": transaction}
+
+
+@claims_router.get("/claims/{claim_id}/audit")
+def get_audit(claim_id: str):
+    """Full audit trail timeline for the claim (requirements.md §11), oldest first --
+    every tool call, retrieval detail, and human action, each tagged with who performed
+    it (`source`: 'agent' or 'human') and when."""
+    with db.get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id FROM claims WHERE id = %s", (claim_id,))
+            if not cur.fetchone():
+                raise HTTPException(status_code=404, detail="claim not found")
+
+            cur.execute(
+                """
+                SELECT event_type, event_subtype, payload, source, created_at
+                FROM audit_trail WHERE claim_id = %s ORDER BY created_at ASC
+                """,
+                (claim_id,),
+            )
+            entries = cur.fetchall()
+
+    return {"entries": entries}
 
 
 @claims_router.get("/claims/{claim_id}/questions")
@@ -152,6 +250,7 @@ def answer_claim(claim_id: str, body: AnswerIn, background_tasks: BackgroundTask
                 (claim_id,),
             )
 
+    ledger.log_audit(claim_id, "human_answer", {"answer": body.answer}, "human")
     background_tasks.add_task(worker.resume_claim_agent, claim_id, body.answer)
     return {"claim_id": claim_id, "status": "processing"}
 

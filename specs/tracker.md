@@ -24,15 +24,12 @@ Do all of this first — nothing in Phase 1+ can run without these keys/services
   - ⚠️ Confirm `OPENAI_API_KEY` uses a valid OpenAI key (`sk-...` prefix) and `LANGSMITH_API_KEY` uses the LangSmith key prefix (`lsv2_pt_...`).
 - [x] 🌐 Set a usage limit/budget alert under **Billing → Limits** (recommended, not required)
 
-### Pinecone (semantic memory / policy corpus)
-- [x] 🌐 Sign up at app.pinecone.io
-- [x] 🌐 Create or select a project
-- [x] 🌐 Create an index:
-  - name: `claims-policy-corpus` (or your choice — record it, it goes in `.env`)
-  - dimension: **1536** (must match `text-embedding-3-small`)
-  - metric: **cosine**
-  - type: Serverless, region close to your Ubuntu server
-- [x] 🌐 Generate an API key under **API Keys**
+### Qdrant (semantic memory / policy corpus)
+**Superseded Pinecone here — see Phase 3.** Original Pinecone setup (sign up, create a
+`claims-policy-corpus` index, generate an API key) is no longer part of the live stack.
+- [x] 🌐 Sign up / create a cluster at Qdrant Cloud
+- [x] 🌐 Generate an API key
+- [x] 🌐 Record the cluster URL — goes in `.env` as `QDRANT_URL`/`QDRANT_API_KEY`; collection (`claims-policy-corpus`, 1536-dim/cosine to match `text-embedding-3-small`) is created automatically by `scripts/ingest_policy_corpus.py` on first run, not manually
 
 ### LangSmith (dev-time tracing)
 - [x] 🌐 Sign up at smith.langchain.com
@@ -63,11 +60,11 @@ Do all of this first — nothing in Phase 1+ can run without these keys/services
 - [x] 💻 `docker-compose.yml` with a local Postgres service for dev (mirrors the prod Postgres engine)
 - [x] 💻 `.env.example` / `.env.local` listing every required variable:
   - `OPENAI_API_KEY`
-  - `PINECONE_API_KEY`, `PINECONE_INDEX`
+  - `QDRANT_URL`, `QDRANT_API_KEY`, `QDRANT_COLLECTION`
   - `LANGSMITH_API_KEY`, `LANGSMITH_TRACING=true`, `LANGSMITH_ENDPOINT`, `LANGSMITH_PROJECT`
   - `DATABASE_URL`
   - `AUTH_PASSWORD` (shared-password gate)
-- [x] 💻 Fill in remaining real values from Phase 0 (Pinecone, DB, auth password) — never commit `.env.local`
+- [x] 💻 Fill in remaining real values from Phase 0 (Qdrant, DB, auth password) — never commit `.env.local`
 
 ---
 
@@ -82,11 +79,14 @@ Do all of this first — nothing in Phase 1+ can run without these keys/services
 
 ## Phase 3 — RAG Ingestion Pipeline
 
-- [ ] 🌐/💻 Source or author sample policy & regulation documents (Word/PDF). **This is a content-authoring task, not code** — write/collect these in Word or Google Docs outside VS Code, then drop the files into a `policy_docs/` folder in the repo.
-- [ ] 💻 Ingestion script: `unstructured` parse → custom clause-boundary chunker (per requirements.md §9) → embed via `text-embedding-3-small` → upsert to Pinecone
-- [ ] 💻 Run ingestion once against the Pinecone index created in Phase 0
-- [ ] 💻 Retrieval function: query → top **k=20** → GPT rerank → relevance-floor check → top **3** (or zero, per requirements.md §9)
-- [ ] 💻 Manual smoke test: run one sample query, confirm sensible results + citations come back
+- [x] 🌐/💻 Source or author sample policy & regulation documents. `docs/files/*.md` — 5 rail-specific policies (ACH, CCD/credit card, DBD/debit card, ZEL/P2P, FRD/fraud) plus a corpus index describing the intended chunk structure, 101 numbered provisions total. Markdown rather than the originally-planned Word/PDF, and already present in the repo before this phase — not authored as part of checking this off.
+- [x] 💻 **Vector store migrated from Pinecone to Qdrant** (2026-08-16, at the user's request). Embeddings unchanged (`text-embedding-3-small`, 1536-dim, cosine) — only the store/query client swapped, so this was a low-risk change, not a reranker/embedding-model redesign. `backend/agent/tools.py`: `_pinecone_index_client()` → `_qdrant()`; `search_policy` now calls `QdrantClient.query_points(..., query_filter=Filter(claim_type=...))` instead of `index.query(...)`. `pinecone` dropped from `backend/requirements.txt`, `qdrant-client` added. `PINECONE_API_KEY`/`PINECONE_INDEX` removed from `.env.example`/`.env.local`; `QDRANT_URL`/`QDRANT_API_KEY`/`QDRANT_COLLECTION` added. requirements.md/technical.md's Pinecone references updated to Qdrant (technical.md's Phase 4/5 status notes below keep "Pinecone" where they're narrating what was actually true at that past point in time).
+- [x] 💻 Ingestion script: `scripts/ingest_policy_corpus.py`. Real clause-boundary chunker (requirements.md §9) — one chunk per `###`/`####` markdown heading (each is a single numbered provision, e.g. `FRD-2.1`), not the naive paragraph-split placeholder from an earlier throwaway script (`upload_markdown_to_qdrant.py`, now deleted). Parses the fixed-order `**Effective:**`/`**Applies to:**`/`**Cross-references:**`/`**Regulatory basis:**` lines under each heading into payload metadata and strips them from the embedded text; prepends the section heading path to the clause body instead (`docs/files/00_CORPUS_INDEX.md`'s own stated guidance — heading-path text retrieves better than the bare clause). Each chunk tagged `claim_type: billing_dispute` (ACH/CCD/DBD/ZEL) or `fraud` (FRD) for `search_policy`'s filter. Point IDs are `uuid5(doc_id:citation)`, so re-running is idempotent (upsert, not duplicate).
+- [x] 💻 Run ingestion once against the Qdrant collection (`claims-policy-corpus`, created automatically on first run). 101 parsed clauses (81 `billing_dispute` + 20 `fraud`) — matches the corpus index's stated "Active provisions: 101" exactly (105 total minus 4 superseded versions, correctly excluded by the chunker).
+- [x] 💻 Retrieval function: query → top **k=20** → relevance-floor check → top **3** (or zero, per requirements.md §9). **Gap carried over from the original Pinecone implementation, not introduced by this migration**: `search_policy` has never actually called GPT to rerank the top-20 — despite technical.md's Reranker row describing "prompt GPT to score/reorder the top-20 candidates," the code has only ever sorted by raw cosine score and truncated to top-3. Not fixed here (out of scope for a vector-store swap); flagged for whoever picks this up next.
+- [x] 💻 Manual smoke test: `search_policy.invoke(...)` run directly against live Qdrant for both claim types — e.g. "How long does a customer have to dispute an unauthorized ACH debit?" (`billing_dispute`) correctly top-matched `ACH-2.1` (score 0.684, "Consumer Unauthorized Debit Window"); "when must fraud claims be escalated to human review" (`fraud`) correctly top-matched `FRD-6.1` ("Mandatory Human Review"). Full agent smoke test (`python -m backend.smoke_test_agent`, same `ACC-9001` fraud scenario as Phase 4/5) re-run end-to-end: `policy_liability_rule` now resolves **PASS** citing real clauses (`FRD-4.2` account-takeover indicators, `FRD-2.4` automated-determination exclusions, `FRD-5.1` referral triggers) instead of the old BLOCKED-on-empty-index result — overall decision `approve`, all 4 checks PASS.
+
+**Bug found and fixed during this migration: `RELEVANCE_FLOOR` was miscalibrated.** It was set to `0.75` back when the tool was first built, with no real data ever behind it to check the number against (Pinecone stayed empty through Phases 4 and 5). Once Qdrant had real embeddings, cosine scores from `text-embedding-3-small` showed genuinely relevant clauses landing ~0.55-0.68 and off-topic queries ~0.06-0.08 — `0.75` was silently discarding every correct match and would have made retrieval permanently return zero results even with a fully populated, correct index. Recalibrated to `0.5` (comfortable margin above the noise floor, below the relevant-match range) in `backend/agent/tools.py`.
 
 ---
 
@@ -160,6 +160,16 @@ Two real integration issues surfaced getting it working, both fixed:
 1. **Function tools + reasoning aren't supported together on `/v1/chat/completions`.** `gpt-5.6-luna` is a reasoning model; binding tools via the default Chat Completions endpoint errors with `"Function tools with reasoning_effort are not supported... use /v1/responses or set reasoning_effort to 'none'"`. Setting `reasoning_effort="none"` would work but defeats the point of using a reasoning model. Fixed by setting `use_responses_api=True` on `ChatOpenAI`, which routes through `/v1/responses` and keeps reasoning intact while still supporting tool calls. Re-ran the full smoke test and the HTTP `ask_human`/`/answer` end-to-end test (fresh account, no profile row) against the swapped model — same correct behavior as `gpt-4.1`: the previously-fixed `policy_dispute_window` grounding bug stayed fixed (resolved `BLOCKED`, not a fabricated pass), interrupt/resume through the real API worked, decisions matched expectations. Took noticeably more tool-call iterations and wall-clock time per call than `gpt-4.1` (visible reasoning latency), still well within the 12-iteration cap.
 2. **Reasoning models reject any non-default `temperature`.** Both the agent (`temperature=0`, for deterministic decisioning) and the data generator (`temperature=0.4`, for variety across generated scenarios) previously set an explicit temperature. `gpt-5.6-luna` returns `400 Unsupported value: 'temperature' does not support ... Only the default (1) value is supported` on raw API calls — confirmed on both `/v1/chat/completions` and `/v1/responses` directly. Oddly, `langchain_openai`'s `ChatOpenAI` was **silently dropping** `temperature=0` rather than raising when `use_responses_api=True`, which would have been misleading left in the code. Removed the `temperature` argument from both call sites with a comment explaining why; determinism of the *decision* itself is unaffected since that's still computed from the check ledger in code (requirements.md §6), never sampled from the model.
 
+### LLM provider made switchable: OpenAI ⇄ OpenRouter (2026-08-16)
+
+At the user's request, the agent's Think-step model (`backend/agent/graph.py`) is no longer hardcoded to OpenAI. New module `backend/agent/llm.py` builds the model from `.env.local`'s `LLM_PROVIDER` (`openai`, the default, or `openrouter`), so switching providers is a one-line env change, no code edit or redeploy. `OPENAI_API_KEY`/`OPENAI_MODEL` and `OPENROUTER_API_KEY`/`OPENROUTER_MODEL`/`OPENROUTER_BASE_URL` all now live in `.env.local`/`.env.example` rather than any value being fixed in code. Scope: only the agent's reasoning LLM is switchable — `search_policy`'s embeddings stay pinned to OpenAI's `text-embedding-3-small` regardless of `LLM_PROVIDER` (switching that would break dimension/score compatibility with the already-ingested Qdrant collection), and `backend/generate_synthetic_data.py` (an offline dev tool, not part of the live agent) stays OpenAI-only.
+
+Verified both paths against the real, running app rather than assumed:
+- **`LLM_PROVIDER=openai`** (default): re-ran a claim end-to-end through the actual API after the refactor — same correct `approve` outcome as before, confirming the extraction into `llm.py` didn't change behavior.
+- **`LLM_PROVIDER=openrouter`**, `OPENROUTER_MODEL=openrouter/free` (OpenRouter's own auto-router, restricted to free tool-calling-capable models — matches the working sample the user provided): first probed a single tool-calling request directly (confirms `tool_choice="required"` — which the whole agent design depends on, requirements.md §5 step 2 — is actually honored by whatever free model OpenRouter routes to, since this isn't documented/guaranteed across all providers). It correctly called `lookup_transaction` with the right args. Then ran a full claim end-to-end over real HTTP (`ACC-9002` duplicate-charge scenario): the agent correctly called `lookup_transaction`, `lookup_account_profile`, `check_duplicate_charge` (correctly resolving `duplicate_charge_check` PASS against the real TXN-2006/TXN-2007 duplicate), and `search_policy` (resolving `policy_dispute_window` PASS via Qdrant) — landing on the correct `approve` decision matching what `gpt-5.6-luna` would have produced. Confirms the whole tool-calling ReAct loop works unmodified with OpenRouter as the provider.
+
+**Known limitation, not fixed**: OpenRouter's free tier is rate-limited (50 requests/day with no credit ever purchased on the account, 20 requests/minute) — a single claim run makes 5-8 LLM calls, so this is easy to exhaust well before running a full 10-claim Phase 8 evaluation set on it. Fine for occasional/demo use or as a zero-cost fallback; not a substitute for the OpenAI path if running the full eval suite. Left as `LLM_PROVIDER=openai` after testing (matches `.env.example`'s documented default) — the user can flip it back anytime.
+
 ---
 
 ## Phase 6 — Frontend (React)
@@ -179,6 +189,15 @@ Two real integration issues surfaced getting it working, both fixed:
   6. Zero browser console errors across the whole run (`console --errors` equivalent checked after every step).
   
   Test claim data cleaned up from the dev DB afterward. No project skill was captured for this (per the `run` skill's guidance, only worth doing if it "just worked" without setup — this needed installing Playwright + downloading Chromium from scratch, so a `/run-skill-generator` pass would be worthwhile before the next frontend change needs the same verification).
+
+- [x] 💻 **Account/Transaction + Audit Trail tabs** (2026-08-16, requirements.md §11). Claim detail view split into three tabs (`frontend/src/components/ClaimDetail.jsx`): Checks (previous default view, unchanged), **Account & Transaction**, and **Audit Trail**.
+  - Two new read-only endpoints in `backend/main.py`: `GET /claims/{id}/context` (looks up the account profile + disputed transaction from `claim_payload`'s `account_id`/`disputed_transaction_id` against the same `account_profiles`/`transactions` fixture tables the Grounding tools query — a display convenience, not a tool call, so it doesn't touch the check ledger) and `GET /claims/{id}/audit` (full `audit_trail` timeline for the claim, oldest first).
+  - **Gap found and fixed while building this**: every `audit_trail` row ever written had `source = 'agent'` — including the claim's own submission and the human's answer to an `ask_human` question, both genuinely human-performed actions with no distinct audit row of their own (the human's answer text only showed up buried inside the *next* agent tool-call's payload). Requirements.md §11 now explicitly requires agent/human attribution on every entry, so this needed fixing, not just displaying: `backend/main.py`'s `create_claim` now logs a `claim_submitted` / `source: "human"` entry, and `answer_claim` now logs a `human_answer` / `source: "human"` entry, both via the existing `backend/agent/ledger.py:log_audit`. Verified over HTTP with a fresh claim: the timeline correctly opens with `human | claim_submitted` before `agent | run_started`.
+  - Frontend polls `GET /claims/{id}/audit` alongside `GET /claims/{id}` on the same 2s cycle while the claim is active, so the Audit Trail tab updates live as the agent runs; `GET /claims/{id}/context` is fetched once per claim selection since account/transaction data doesn't change mid-run. Each audit row shows timestamp, event type, and an Agent/Human source pill, with the full JSON payload expandable on click (same interaction pattern as the existing check-ledger rows).
+  - Verified over HTTP end-to-end (backend restarted, curl against both new endpoints) against a fresh `ACC-9001`/`TXN-7001` claim: `/context` returned the real account profile (Dana Ruiz, standing `good`) and transaction ($1,450.00, TechBuy Electronics, Phoenix AZ); `/audit` returned all 7 entries correctly ordered and sourced, ending in `agent | determination_written`. Browser-level verification not yet re-run (no Playwright driver currently set up in this session — see the note above).
+
+- [x] 💻 **Two more synthetic accounts** (2026-08-16) — `ACC-9002` (Marcus Webb, `billing_dispute`, a same-merchant/same-amount duplicate charge — TXN-2006/TXN-2007, ~90 min apart, exercises `check_duplicate_charge`) and `ACC-9003` (Priya Nandakumar, `fraud`, same anomaly shape as `ACC-9001` but a different city/amount/merchant so the sample set isn't repetitive). Added as two more entries in `backend/generate_synthetic_data.py`'s `SCENARIOS` list — same LLM-generate-then-review pipeline as `ACC-9001`, not hand-written SQL. Added a `--accounts` filter flag to the script's CLI so a subset of scenarios can be (re)generated without touching the others' already-loaded data (running the full script unfiltered would have regenerated `ACC-9001` too, since the model has no seed/temperature control and each call samples fresh — see the Phase 5 LLM-swap notes above). First narrative draft asked for "6-10 transactions" per account (copied from `ACC-9001`'s wording) and generated 9 for `ACC-9002` on a dry run; tightened to "EXACTLY 7 transactions" and regenerated before loading, so all three accounts now have exactly 7 each.
+- [x] 💻 **Account-ID autocomplete + transaction dropdown on the claim form** — `frontend/src/components/ClaimForm.jsx`. Two new endpoints in `backend/main.py`: `GET /accounts` (id + member name, all fixture accounts) and `GET /accounts/{id}/transactions` (that account's transactions). Account ID is now an `<input list>` bound to a `<datalist>` of real accounts (native browser autocomplete, no new dependency); once the typed value matches a known account, the disputed-transaction field switches from free text to a `<select>` populated from that account's real transactions (labeled `TXN-2007 — $54.18 Green Valley Grocers (Denver, CO)`), defaulting to the first one. Typing an account ID that isn't in the fixture data falls back to the original free-text transaction input, so submitting a claim against a not-yet-loaded account still works. Verified over HTTP: `GET /accounts` returns all 3 accounts; `GET /accounts/ACC-9002/transactions` returns its 7 transactions including the TXN-2006/TXN-2007 duplicate pair.
 
 ---
 
@@ -205,13 +224,13 @@ Two real integration issues surfaced getting it working, both fixed:
 - [ ] 🌐 Install system packages: Python 3.11+, Node.js/npm, PostgreSQL server, Nginx, git
 - [ ] 🌐 Create a Postgres DB + user on the server; apply `schema.sql`; note the connection string
 - [ ] 🌐 Get the code onto the server (`git clone`, or `scp` if not using git)
-- [ ] 🌐 Create the server-side `.env` with real production values (OpenAI/Pinecone/LangSmith keys, prod `DATABASE_URL`, `AUTH_PASSWORD`) — copied manually, never committed
+- [ ] 🌐 Create the server-side `.env` with real production values (OpenAI/Qdrant/LangSmith keys, prod `DATABASE_URL`, `AUTH_PASSWORD`) — copied manually, never committed
 - [ ] 🌐 `npm run build` the React app; point Nginx at the static output
 - [ ] 🌐 Create a systemd unit for the FastAPI app (uvicorn) so it restarts on crash/reboot
 - [ ] 🌐 Configure Nginx as a reverse proxy: static frontend + `/api` → FastAPI (uvicorn)
 - [ ] 🌐 `ufw allow` only what's needed (80, 443, OpenSSH) — nothing else should be open to the internet
 - [ ] 🌐 (Optional) Point a domain at the server + get a TLS cert via certbot; otherwise access over HTTP via the server's IP
-- [ ] 🌐 Run the Pinecone ingestion script once against production (same index, or a separate prod index for dev/prod separation)
+- [ ] 🌐 Run `scripts/ingest_policy_corpus.py` once against production (same Qdrant collection, or a separate prod collection for dev/prod separation)
 - [ ] 🌐 Smoke test the deployed URL end-to-end
 
 ---

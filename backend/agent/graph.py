@@ -10,33 +10,25 @@ import json
 from typing import Annotated, Literal, TypedDict
 
 from langchain_core.messages import SystemMessage, ToolMessage
-from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 
 from . import episodic, ledger
 from .checks import REQUIRED_CHECKS
+from .llm import build_agent_model
 from .tools import HUMAN_QUESTION_BUDGET, TOOLS
 
 MAX_ITERATIONS = 12
 NO_PROGRESS_LIMIT = 5
 
 TOOLS_BY_NAME = {t.name: t for t in TOOLS}
-# parallel_tool_calls=False: requirements.md §5 step 2 -- Act takes *one* action per
-# turn. This also sidesteps a real LangGraph interrupt hazard: if a turn's tool_calls
-# included e.g. lookup_transaction *and* ask_human, resuming after the ask_human pause
-# re-runs the whole node from the top, re-executing lookup_transaction's DB writes and
-# producing a duplicate audit_trail row. With exactly one tool call per turn, ask_human
-# (when chosen) has no side effects ahead of it in the same node call, so resume is safe.
-# use_responses_api=True: gpt-5.6-luna is a reasoning model -- the default /v1/chat/completions
-# endpoint rejects function tools together with reasoning ("use /v1/responses or set
-# reasoning_effort to 'none'"). Responses API keeps reasoning intact rather than disabling it.
-# No `temperature` here: reasoning models reject any non-default value outright (confirmed
-# directly against both /v1/chat/completions and /v1/responses) -- langchain_openai was
-# silently dropping temperature=0 rather than raising, which would have been misleading.
-MODEL = ChatOpenAI(model="gpt-5.6-luna", use_responses_api=True).bind_tools(
-    TOOLS, tool_choice="required", parallel_tool_calls=False
-)
+# Provider/model switchable via .env.local's LLM_PROVIDER -- see agent/llm.py. Also
+# sidesteps a real LangGraph interrupt hazard: if a turn's tool_calls included e.g.
+# lookup_transaction *and* ask_human, resuming after the ask_human pause re-runs the
+# whole node from the top, re-executing lookup_transaction's DB writes and producing a
+# duplicate audit_trail row. With exactly one tool call per turn, ask_human (when
+# chosen) has no side effects ahead of it in the same node call, so resume is safe.
+MODEL = build_agent_model(TOOLS)
 
 
 class ClaimState(TypedDict):

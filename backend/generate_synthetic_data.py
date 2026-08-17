@@ -105,6 +105,62 @@ SCENARIOS = [
             "filed_at": "2026-07-20T09:00:00Z",
         },
     },
+    {
+        "account_id": "ACC-9002",
+        "claim_type": "billing_dispute",
+        "disputed_transaction_ref": "TXN-2007",
+        "narrative": (
+            "Member Marcus Webb has an everyday spending pattern. Generate EXACTLY 7 "
+            "transactions total (transaction_ref TXN-2001 through TXN-2007), over the past "
+            "2 months, all under $80, all card_present in Denver, CO -- groceries, coffee "
+            "shops, a gym membership, gas. The last two (TXN-2006 and TXN-2007) are "
+            "near-duplicates: same merchant, same amount (around $54), posted within a few "
+            "hours of each other on the same day, both card_present in Denver. TXN-2007 is "
+            "the later, disputed one -- the member believes he was charged twice by "
+            "mistake. Account standing is 'good', no fraud_red_flags, dispute_history_count "
+            "1 (one prior unrelated dispute, already resolved)."
+        ),
+        "expect": {
+            "account_profile.standing": "good",
+        },
+        "claim_payload": {
+            "account_id": "ACC-9002",
+            "disputed_transaction_id": "TXN-2007",
+            "reason": "duplicate_charge",
+            "filed_at": "2026-07-25T10:00:00Z",
+        },
+    },
+    {
+        "account_id": "ACC-9003",
+        "claim_type": "fraud",
+        "disputed_transaction_ref": "TXN-3007",
+        "narrative": (
+            "Member Priya Nandakumar reports a transaction she does not recognize. Generate "
+            "EXACTLY 7 transactions total (transaction_ref TXN-3001 through TXN-3006, plus "
+            "the disputed TXN-3007). The first 6 are a clean, unremarkable history over the "
+            "past 3 months, all under $150, all in Seattle, WA, all card_present at familiar "
+            "merchants (grocery, pharmacy, restaurants, transit). TXN-3007 is an outlier: "
+            "$2,100, an online electronics or gift-card merchant, and NOT in Seattle (use a "
+            "different city/state than Seattle and than Austin/Phoenix/Denver). It occurred "
+            "at 2026-07-22T03:40:00Z. Also include an access_logs entry within 2 hours "
+            "before that timestamp showing a login from a device_id and ip_address never "
+            "seen in the member's normal pattern, in the same unfamiliar city as the "
+            "disputed transaction, with risk_flag true. Account standing is 'good' with no "
+            "fraud_red_flags and dispute_history_count 0."
+        ),
+        "expect": {
+            "account_profile.standing": "good",
+            "disputed_transaction.amount_over": 500,
+            "disputed_transaction.location_differs_from_history": True,
+            "access_logs.has_risk_flag_near_transaction": True,
+        },
+        "claim_payload": {
+            "account_id": "ACC-9003",
+            "disputed_transaction_id": "TXN-3007",
+            "reason": "unauthorized_transaction",
+            "filed_at": "2026-07-26T09:00:00Z",
+        },
+    },
 ]
 
 
@@ -224,13 +280,21 @@ def load_scenario(scenario: dict, data: dict):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true", help="generate + review only, skip DB writes")
+    parser.add_argument(
+        "--accounts", help="comma-separated account_ids to (re)generate; default is all scenarios"
+    )
     args = parser.parse_args()
+
+    scenarios = SCENARIOS
+    if args.accounts:
+        wanted = set(args.accounts.split(","))
+        scenarios = [s for s in SCENARIOS if s["account_id"] in wanted]
 
     if not args.dry_run:
         db.open_pool()
 
     exit_code = 0
-    for scenario in SCENARIOS:
+    for scenario in scenarios:
         print(f"--- Generating scenario: {scenario['account_id']} / {scenario['claim_type']} ---")
         data = generate_scenario(scenario)
         print(json.dumps(data, indent=2))

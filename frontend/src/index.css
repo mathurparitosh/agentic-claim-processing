@@ -182,6 +182,75 @@ label {
 .decision-box h3 { margin: 0 0 0.35rem; }
 .decision-box p { margin: 0; }
 
+/* Tabs */
+.tabs {
+  display: flex;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 1rem;
+}
+.tab {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  padding: 0.5rem 0.9rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.tab:hover { color: var(--accent); border-color: transparent; }
+.tab-active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+
+/* Account & Transaction */
+.context-panel {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+.context-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+}
+.context-card h3 { margin-top: 0; font-size: 0.95rem; }
+.context-fields {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.35rem 1rem;
+  margin: 0;
+  font-size: 0.85rem;
+}
+.context-fields dt { color: var(--muted); }
+.context-fields dd { margin: 0; text-align: right; }
+
+/* Audit trail */
+.audit-list { list-style: none; padding: 0; }
+.audit-row {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 0.5rem;
+  overflow: hidden;
+}
+.audit-summary {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  background: var(--panel);
+  border: none;
+  border-radius: 0;
+  padding: 0.6rem 0.9rem;
+  text-align: left;
+}
+.audit-time { font-size: 0.75rem; color: var(--muted); white-space: nowrap; }
+.audit-event { flex: 1; font-family: ui-monospace, monospace; font-size: 0.82rem; }
+.source-pill { font-size: 0.7rem; padding: 0.15rem 0.55rem; border-radius: 999px; text-transform: capitalize; }
+.source-agent { background: #e0e7ff; color: #4338ca; }
+.source-human { background: #fce7f3; color: #be185d; }
+
 /* Check ledger */
 .check-list { list-style: none; padding: 0; }
 .check-row {

@@ -59,6 +59,22 @@ export function getDecision(claimId) {
   return request(`/claims/${claimId}/decision`);
 }
 
+export function getContext(claimId) {
+  return request(`/claims/${claimId}/context`);
+}
+
+export function getAudit(claimId) {
+  return request(`/claims/${claimId}/audit`);
+}
+
+export function listAccounts() {
+  return request('/accounts');
+}
+
+export function listAccountTransactions(accountId) {
+  return request(`/accounts/${accountId}/transactions`);
+}
+
 export function submitClaim(claimType, claimPayload) {
   return request('/claims', {
     method: 'POST',

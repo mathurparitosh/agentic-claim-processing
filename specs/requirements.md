@@ -200,7 +200,7 @@ version of the applicable text rather than the model's training data.
   chunks. Preserve parent-child relationships between a policy and its sub-clauses.
   Tables and decision trees are converted to markdown and kept whole within a single
   chunk.
-- Embeddings + similarity search over a vector database (Pinecone).
+- Embeddings + similarity search over a vector database (Qdrant).
 - Retrieval pipeline: retrieve top **k ≈ 20** candidates → rerank → apply a
   **relevance-floor** threshold → return top **3**. If nothing clears the relevance
   floor, the system returns **zero results** — "no matching policy found" is treated
@@ -241,6 +241,15 @@ policy is allowed to close a check.
 - Full retrieval activity (queries, filters, all candidates and scores) is captured,
   not just what was ultimately used, so the reasoning behind a decision can be
   reconstructed after the fact.
+- Every audit entry is tagged with who performed it — **agent** or **human** — so the
+  trail distinguishes autonomous tool calls from processor actions (submitting the
+  claim, answering an `ask_human` question), not just what happened and when.
+- The Claims Application surfaces this to the Claim Processor directly, not only as
+  raw log rows: for a given claim, the processor can view (a) the account profile tied
+  to the claim, (b) the disputed transaction detail, and (c) the full audit trail as a
+  timestamped timeline showing each step and whether the agent or a human performed
+  it. These are separate views/tabs from the check-ledger/decision view (§6), since
+  they answer "what happened and in what order" rather than "what was decided."
 
 ## 12. Evaluation Plan
 
