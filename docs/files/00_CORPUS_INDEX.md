@@ -1,10 +1,11 @@
 # Corpus Index — Meridian Trust Bank Dispute & Fraud Policy Library
 
-**Corpus snapshot:** 2026-07-01
-**Documents:** 5
-**Active provisions:** 101
+**Corpus snapshot:** 2026-07-01 (original 5 documents); NWR added 2026-08-17 for the
+on-demand Recovery agent, specs/technical.md §5
+**Documents:** 6
+**Active provisions:** 114
 **Superseded versions:** 4
-**Total retrievable chunks:** 105
+**Total retrievable chunks:** 118
 
 > *Synthetic corpus created for academic use. Meridian Trust Bank does not exist. No provision here reflects the policy of any real institution, and regulatory citations are illustrative rather than authoritative — verify against actual CFR text before relying on any of it outside this project.*
 
@@ -19,6 +20,17 @@
 | ZEL | Person-to-Person Transfer Dispute and Fraud Claims Policy | 16 | `ZEL-{section}.{rule}[.{sub}]` |
 | ACH | ACH Dispute, Return, and Unauthorized Debit Adjudication Policy | 19 | `ACH-{section}.{rule}[.{sub}]` |
 | FRD | Cross-Rail Fraud Investigation, Scoring, and Claims Governance Policy | 20 | `FRD-{section}.{rule}[.{sub}]` |
+| NWR | Card Network Recovery Policy (Visa, Mastercard, ATM Networks) | 13 | `NWR-{section}.{rule}[.{sub}]` |
+
+NWR is tagged `claim_type: network_recovery` in Qdrant — not one of the two real claim
+types (`billing_dispute`/`fraud`, backend/agent/checks.py's `REQUIRED_CHECKS`), just
+reusing the same claim_type-filtered-collection pattern for a second, unrelated corpus
+retrieved by a different tool (`search_network_policy`) used only by the on-demand
+Recovery agent, never by the main claim-processing loop. The rest of this index (§2-9)
+describes the original 5-document corpus and its eval-design scenarios; it wasn't
+extended for NWR, which is a much smaller, single-purpose corpus without the
+superseded-version/near-duplicate/coverage-gap test scaffolding built into the
+original 5.
 
 ---
 

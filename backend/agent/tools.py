@@ -250,6 +250,44 @@ def search_policy(query: str, claim_type: str) -> dict:
     }
 
 
+@tool
+def search_network_policy(query: str) -> dict:
+    """Retrieval tool for the on-demand Recovery agent only (specs/technical.md §5) --
+    not part of the main claim-processing tool set. Semantic search over the
+    card-network (Visa/Mastercard/ATM) chargeback reason-code and filing-window
+    corpus. Returns up to 3 relevant clauses with citations, or zero results if
+    nothing clears the relevance floor -- 'no matching policy found' is a valid,
+    honest outcome, not an error."""
+    embedding = _openai().embeddings.create(model="text-embedding-3-small", input=query).data[0].embedding
+    raw = _qdrant().query_points(
+        collection_name=os.getenv("QDRANT_COLLECTION", "claims-policy-corpus"),
+        query=embedding,
+        limit=20,
+        query_filter=models.Filter(
+            must=[models.FieldCondition(key="claim_type", match=models.MatchValue(value="network_recovery"))]
+        ),
+        with_payload=True,
+    )
+
+    candidates = [
+        {
+            "id": str(p.id),
+            "score": p.score,
+            "text": (p.payload or {}).get("text"),
+            "citation": (p.payload or {}).get("citation"),
+        }
+        for p in raw.points
+    ]
+    top = sorted((c for c in candidates if c["score"] >= RELEVANCE_FLOOR), key=lambda c: -c["score"])[:3]
+
+    return {
+        "query": query,
+        "results": top,
+        "candidate_count": len(candidates),
+        "candidates": candidates,
+    }
+
+
 # ---- Human-in-the-loop --------------------------------------------------------
 
 

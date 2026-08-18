@@ -11,7 +11,7 @@ const STATUS_LABELS = {
   completed: 'Completed',
 };
 
-export default function ClaimList({ selectedClaimId, onSelect, refreshToken }) {
+export default function ClaimList({ openClaimIds, onSelect, refreshToken }) {
   const [claims, setClaims] = useState([]);
   const [error, setError] = useState('');
 
@@ -47,7 +47,7 @@ export default function ClaimList({ selectedClaimId, onSelect, refreshToken }) {
         {claims.map((c) => (
           <li
             key={c.id}
-            className={c.id === selectedClaimId ? 'selected' : ''}
+            className={openClaimIds.has(c.id) ? 'selected' : ''}
             onClick={() => onSelect(c.id)}
           >
             <div className="claim-list-row">

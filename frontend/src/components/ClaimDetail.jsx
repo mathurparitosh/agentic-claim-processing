@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { getClaim, getContext, getAudit, answerQuestion } from '../api';
+import { getClaim, getContext, getAudit, answerQuestion, checkRecoveryEligibility } from '../api';
 
 const POLL_MS = 2000;
 const ACTIVE_STATUSES = new Set(['pending', 'processing', 'awaiting_input']);
+const RECOVERY_ELIGIBLE_DECISIONS = new Set(['approve', 'inconclusive']);
 const TABS = [
   { id: 'checks', label: 'Checks' },
   { id: 'context', label: 'Account & Transaction' },
@@ -93,6 +94,50 @@ function AuditRow({ entry }) {
   );
 }
 
+function SummaryPane({ claim, context, loading }) {
+  const account = context?.account;
+  const transaction = context?.transaction;
+  const disputeType = claim.claim_payload?.reason;
+
+  return (
+    <aside className="claim-summary-pane">
+      <div className="summary-section">
+        <h3>Account</h3>
+        {loading ? (
+          <p className="muted">Loading…</p>
+        ) : account ? (
+          <dl className="context-fields">
+            <dt>Account ID</dt><dd>{account.account_id}</dd>
+            <dt>Name</dt><dd>{account.member_name || '—'}</dd>
+          </dl>
+        ) : (
+          <p className="muted">Not found.</p>
+        )}
+      </div>
+
+      <div className="summary-section">
+        <h3>Transaction</h3>
+        {loading ? (
+          <p className="muted">Loading…</p>
+        ) : transaction ? (
+          <dl className="context-fields">
+            <dt>Reference</dt><dd>{transaction.transaction_ref}</dd>
+            <dt>Merchant</dt><dd>{transaction.merchant || '—'}</dd>
+            <dt>Amount</dt><dd>${Number(transaction.amount).toFixed(2)}</dd>
+          </dl>
+        ) : (
+          <p className="muted">Not found.</p>
+        )}
+      </div>
+
+      <div className="summary-section">
+        <h3>Dispute type</h3>
+        <p className="summary-value">{disputeType ? disputeType.replaceAll('_', ' ') : '—'}</p>
+      </div>
+    </aside>
+  );
+}
+
 function AuditPanel({ entries, loading }) {
   if (loading && !entries) return <p className="muted">Loading…</p>;
   if (!entries || entries.length === 0) return <p className="muted">No audit entries yet.</p>;
@@ -113,6 +158,7 @@ export default function ClaimDetail({ claimId, onAnswered }) {
   const [error, setError] = useState('');
   const [answerText, setAnswerText] = useState('');
   const [answering, setAnswering] = useState(false);
+  const [recoveryStatus, setRecoveryStatus] = useState('idle'); // 'idle' | 'checking' | 'done'
 
   useEffect(() => {
     if (!claimId) return;
@@ -138,6 +184,7 @@ export default function ClaimDetail({ claimId, onAnswered }) {
     setContext(null);
     setAudit(null);
     setTab('checks');
+    setRecoveryStatus('idle');
     poll();
     getContext(claimId).then((data) => {
       if (!cancelled) setContext(data);
@@ -167,6 +214,21 @@ export default function ClaimDetail({ claimId, onAnswered }) {
     }
   }
 
+  async function handleCheckRecovery() {
+    setRecoveryStatus('checking');
+    setError('');
+    try {
+      await checkRecoveryEligibility(claimId);
+      const auditData = await getAudit(claimId);
+      setAudit(auditData.entries);
+      setTab('audit');
+      setRecoveryStatus('done');
+    } catch (err) {
+      setError(err.message);
+      setRecoveryStatus('idle');
+    }
+  }
+
   if (!claimId) {
     return <div className="claim-detail muted">Select a claim to view details.</div>;
   }
@@ -178,66 +240,79 @@ export default function ClaimDetail({ claimId, onAnswered }) {
   }
 
   return (
-    <div className="claim-detail">
-      <h2>Claim detail</h2>
-      <div className="claim-meta">
-        <div><span className="label">ID</span> {claim.id}</div>
-        <div><span className="label">Type</span> {claim.claim_type}</div>
-        <div><span className="label">Status</span> <span className={`status-badge status-${claim.status}`}>{claim.status}</span></div>
-        <div><span className="label">Submitted</span> {new Date(claim.submitted_at).toLocaleString()}</div>
-      </div>
-
-      {claim.status === 'awaiting_input' && claim.pending_question && (
-        <div className="question-box">
-          <h3>The agent needs input</h3>
-          <p className="question-text">{claim.pending_question.question}</p>
-          <p className="muted">Resolving check: {claim.pending_question.check_name}</p>
-          <div className="question-actions">
-            <button disabled={answering} onClick={() => submitAnswer('yes')}>Yes</button>
-            <button disabled={answering} onClick={() => submitAnswer('no')}>No</button>
-          </div>
-          <div className="question-actions">
-            <input
-              value={answerText}
-              onChange={(e) => setAnswerText(e.target.value)}
-              placeholder="Or type a specific answer…"
-            />
-            <button disabled={answering || !answerText} onClick={() => submitAnswer(answerText)}>Send</button>
-          </div>
+    <div className="claim-detail-layout">
+      <SummaryPane claim={claim} context={context} loading={!context} />
+      <div className="claim-detail">
+        <h2>Claim detail</h2>
+        <div className="claim-meta">
+          <div><span className="label">ID</span> {claim.id}</div>
+          <div><span className="label">Type</span> {claim.claim_type}</div>
+          <div><span className="label">Status</span> <span className={`status-badge status-${claim.status}`}>{claim.status}</span></div>
+          <div><span className="label">Submitted</span> {new Date(claim.submitted_at).toLocaleString()}</div>
         </div>
-      )}
 
-      {claim.decision && (
-        <div className={`decision-box decision-${claim.decision}`}>
-          <h3>{DECISION_LABELS[claim.decision] || claim.decision}</h3>
-          <p>{claim.decision_reason}</p>
-        </div>
-      )}
+        {claim.status === 'awaiting_input' && claim.pending_question && (
+          <div className="question-box">
+            <h3>The agent needs input</h3>
+            <p className="question-text">{claim.pending_question.question}</p>
+            <p className="muted">Resolving check: {claim.pending_question.check_name}</p>
+            <div className="question-actions">
+              <button disabled={answering} onClick={() => submitAnswer('yes')}>Yes</button>
+              <button disabled={answering} onClick={() => submitAnswer('no')}>No</button>
+            </div>
+            <div className="question-actions">
+              <input
+                value={answerText}
+                onChange={(e) => setAnswerText(e.target.value)}
+                placeholder="Or type a specific answer…"
+              />
+              <button disabled={answering || !answerText} onClick={() => submitAnswer(answerText)}>Send</button>
+            </div>
+          </div>
+        )}
 
-      <div className="tabs">
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            className={`tab ${tab === t.id ? 'tab-active' : ''}`}
-            onClick={() => setTab(t.id)}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+        {claim.decision && (
+          <div className={`decision-box decision-${claim.decision}`}>
+            <h3>{DECISION_LABELS[claim.decision] || claim.decision}</h3>
+            <p>{claim.decision_reason}</p>
+            {RECOVERY_ELIGIBLE_DECISIONS.has(claim.decision) && (
+              <button
+                type="button"
+                className="recovery-btn"
+                disabled={recoveryStatus === 'checking'}
+                onClick={handleCheckRecovery}
+              >
+                {recoveryStatus === 'checking' ? 'Checking…' : 'Check Recovery Eligibility'}
+              </button>
+            )}
+          </div>
+        )}
 
-      {tab === 'checks' && (
-        <ul className="check-list">
-          {claim.checks.map((c) => (
-            <CheckRow key={c.check_name} check={c} />
+        <div className="tabs">
+          {TABS.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              className={`tab ${tab === t.id ? 'tab-active' : ''}`}
+              onClick={() => setTab(t.id)}
+            >
+              {t.label}
+            </button>
           ))}
-        </ul>
-      )}
-      {tab === 'context' && <ContextPanel context={context} loading={!context} />}
-      {tab === 'audit' && <AuditPanel entries={audit} loading={!audit} />}
+        </div>
 
-      {error && <p className="error">{error}</p>}
+        {tab === 'checks' && (
+          <ul className="check-list">
+            {claim.checks.map((c) => (
+              <CheckRow key={c.check_name} check={c} />
+            ))}
+          </ul>
+        )}
+        {tab === 'context' && <ContextPanel context={context} loading={!context} />}
+        {tab === 'audit' && <AuditPanel entries={audit} loading={!audit} />}
+
+        {error && <p className="error">{error}</p>}
+      </div>
     </div>
   );
 }

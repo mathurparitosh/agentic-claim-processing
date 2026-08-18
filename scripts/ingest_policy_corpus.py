@@ -39,12 +39,19 @@ ID_NAMESPACE = uuid.UUID("c39b6a1e-2a7f-4e3a-9a3d-2b0a6d6f2b40")
 # Filename prefix -> claim taxonomy (backend/agent/checks.py). Files with no
 # entry here (e.g. 00_CORPUS_INDEX.md, which is meta-documentation about the
 # corpus rather than policy text) are skipped.
+#
+# "network_recovery" isn't a real claim_type (backend/agent/checks.py's
+# REQUIRED_CHECKS only has "billing_dispute"/"fraud") -- it's a separate tag reusing
+# search_policy's/search_network_policy's existing claim_type-filtered-collection
+# pattern (specs/technical.md §5) for the on-demand Recovery agent's own corpus,
+# kept in the same Qdrant collection rather than standing up a second one.
 CLAIM_TYPE_BY_DOC_ID = {
     "ACH": "billing_dispute",
     "CCD": "billing_dispute",
     "DBD": "billing_dispute",
     "ZEL": "billing_dispute",
     "FRD": "fraud",
+    "NWR": "network_recovery",
 }
 
 HEADING_RE = re.compile(r"^(#{2,4})\s+(.*)$")

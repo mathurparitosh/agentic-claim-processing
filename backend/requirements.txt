@@ -10,3 +10,9 @@ psycopg_pool
 python-dotenv
 langsmith
 unstructured
+
+# Dev/eval only (Phase 9, backend/eval_notebook.ipynb) -- not needed to run the app.
+jupyter
+nbformat
+ipykernel
+pandas

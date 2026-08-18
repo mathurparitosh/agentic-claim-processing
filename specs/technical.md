@@ -20,7 +20,7 @@
 | `ask_human` channel  | **Polling**                                                       | WebSockets — rejected, connection-management complexity (reconnects, scaling) not justified by a human-paced workflow. SSE — rejected as an unnecessary middle ground when polling is simple enough and sufficient.                                                                                                                                                                                                                                                                  | React polls a FastAPI status endpoint for pending questions/answers. Simplest to build, no connection-management overhead; fine when sub-second latency isn't needed.                                                                                                                                                                                                                                                               |
 | Synthetic data       | **LLM-generated**                                                 | Hand-authored fixtures — rejected; more deterministic/auditable but more manual effort to produce. Script-generated (Faker/random) — rejected; more volume/variety but harder to hand-verify a claim's evidence matches its intended expected outcome.                                                                                                                                                                                                                               | GPT generates the simulated transaction history, system logs, and account red-flag records for the 10 test claims. Review each generated record against its claim's intended expected outcome so the synthetic evidence doesn't accidentally contradict the test's expected decision.                                                                                                                                               |
 | Test harness         | **Notebook-based**                                                | pytest + fixtures — rejected; more rigorous and CI-ready, but more ceremony than needed for a capstone eval/demo. Custom eval script — rejected; a viable middle ground, but a notebook is better suited to interactive trace inspection for the writeup.                                                                                                                                                                                                                            | The 10-claim evaluation set (requirements.md §12) is run and inspected in a Jupyter notebook — each claim's agent trace and decision reviewed interactively. Fits a capstone demo/writeup; not wired into CI.                                                                                                                                                                                                                       |
-| Deployment           | **Self-managed Ubuntu VM** (existing server)                      | Local only — rejected; no reachable URL for a demo. A managed PaaS (Fly.io/Railway) — not needed; a suitable Ubuntu server is already available.                                                                                                                                                                                                                                                                                                                                     | FastAPI backend (via systemd + uvicorn), the built React static files (served via Nginx), and Postgres all run on the existing Ubuntu VM, reachable over the server's IP (or a domain if one is pointed at it). Setup is manual (SSH, package installs, systemd unit, Nginx reverse-proxy config) rather than a PaaS's managed build/deploy pipeline — see tracker.md Phase 9 for the concrete steps.                               |
+| Deployment           | **Self-managed Ubuntu VM** (existing server)                      | Local only — rejected; no reachable URL for a demo. A managed PaaS (Fly.io/Railway) — not needed; a suitable Ubuntu server is already available.                                                                                                                                                                                                                                                                                                                                     | FastAPI backend (via systemd + uvicorn), the built React static files (served via Nginx), and Postgres all run on the existing Ubuntu VM, reachable over the server's IP (or a domain if one is pointed at it). Setup is manual (SSH, package installs, systemd unit, Nginx reverse-proxy config) rather than a PaaS's managed build/deploy pipeline — see tracker.md Phase 10 for the concrete steps.                               |
 | Auth                 | **Shared-password gate**                                          | None / single-user — rejected once the app is reachable at a public VM URL, it needs some gate. Basic user accounts — rejected; more build effort than justified for a capstone that isn't about auth.                                                                                                                                                                                                                                                                               | One shared password/API key protects the FastAPI endpoints on the public demo VM — keeps the URL from being wide open, without building real per-user accounts. Note: this means the Audit Trail can't attribute an action to a specific processor if more than one person ever uses it — acceptable for a single-user capstone demo, but not a substitute for real per-user auth if this became multi-user.                        |
 | Secrets management   | **`.env` + `python-dotenv`**                                      | Cloud secrets manager — rejected; more production-realistic and slightly safer, but adds setup not justified at capstone/single-VM scale.                                                                                                                                                                                                                                                                                                                                            | OpenAI/Qdrant/LangSmith keys live in a gitignored `.env`, loaded via `python-dotenv`; the same file is copied (never committed) onto the deploy VM.                                                                                                                                                                                                                                                                               |
 
@@ -92,7 +92,7 @@ unassigned.
 requirements.md §4 says the checks that apply are "determined only after reading the
 claim" but doesn't enumerate claim types or checks. This section is that enumeration —
 the concrete mapping the LangGraph agent, synthetic-data fixtures, and (later) the
-Phase 8 eval set are all built against. Two claim types, matching requirements.md §1's
+Phase 9 eval set are all built against. Two claim types, matching requirements.md §1's
 "billing dispute or fraud claims" framing.
 
 Each check is deterministically required for its claim type (looked up by
@@ -166,7 +166,152 @@ with `window_days: 60` despite the vector store having 0 vectors at the time). R
 that tool; a check able to close only through an actual retrieval hit can't be
 bypassed this way.
 
-## 5. Open / To-Be-Decided
+## 5. Multi-Agent Orchestration (Research / Decisioning) + On-Demand Recovery Agent
 
-All previously open items now have a decision (§1, §4). Nothing outstanding at this
+**Built 2026-08-17** (tracker.md Phase 7 has the full implementation/verification
+writeup). Two independent structures, not three peer agents sharing one loop:
+
+1. An **orchestrator graph** that replaces the single agent's Think/Act/Observe loop
+   as the default claim-processing path. `backend/agent/graph.py` (today's single
+   agent) stays in the codebase as a selectable fallback via a new env var, mirroring
+   the existing `LLM_PROVIDER` switch pattern (§1) — the orchestrator becomes the
+   default, the legacy single agent isn't deleted.
+2. A separate, **on-demand Recovery agent**, triggered per claim after a decision
+   already exists — not part of the orchestrator graph's run at all.
+
+**Motivation**: primarily to demonstrate a multi-agent orchestration pattern for the
+capstone, not a fix for an observed limitation in the current single-agent loop.
+
+### Orchestrator graph: Research + Decisioning sub-agents
+
+- **Research agent** — owns Grounding + Retrieval tools only (`lookup_transaction`,
+  `lookup_account_profile`, `lookup_access_logs`, `search_policy`). Gathers evidence
+  and updates the check ledger for evidence-type checks (`transaction_exists`,
+  `account_standing`, `account_red_flags`, `system_access_log_check`,
+  `policy_dispute_window`, `policy_liability_rule`, per §4's taxonomy). Makes no
+  approve/deny judgment of any kind.
+- **Decisioning agent** — owns Computation tools (`check_duplicate_charge`,
+  `check_transaction_anomaly`) + `ask_human`, plus the orchestration judgment of which
+  still-UNKNOWN/BLOCKED check to pursue next (hand back to Research for more evidence,
+  call a computation tool, or escalate to `ask_human`) — the same judgment the single
+  agent's Think step already exercises today, just scoped to a narrower toolset behind
+  a distinct LLM call. **The final Approve/Deny/Inconclusive outcome is unchanged**:
+  still computed by `compute_decision(check_ledger)` in code once every check is
+  resolved or a termination condition is hit (any FAIL → deny short-circuit, iteration
+  ≥ 12, 5 no-progress iterations, or the 3-question human budget — same rules as today,
+  requirements.md §5). Neither sub-agent, nor the orchestrator itself, ever asserts the
+  outcome directly — this is what keeps requirements.md §13's "Determinism of
+  decisioning" intact across the refactor.
+- The orchestrator routes to Research first, and hands off to Decisioning
+  permanently (never back) once either (a) no research-owned check is still UNKNOWN,
+  or (b) Research's iteration budget runs out — **not** purely (a) alone. (b) exists
+  because a research check can be legitimately unresolvable by any research tool (e.g.
+  `account_standing` stays UNKNOWN forever if `lookup_account_profile` can't find a
+  profile at all — that never becomes BLOCKED, just permanently UNKNOWN). Found via
+  `backend/smoke_test_orchestrator.py` during implementation: a claim against a hidden
+  account profile looped in Research for the whole run and hit the *global*
+  no-progress cap before Decisioning — and therefore `ask_human`, which only
+  Decisioning owns — ever got a turn, landing `inconclusive` instead of correctly
+  escalating to a human. Research's iteration budget is
+  `len(research-owned checks in this claim) + 2`, deliberately tight rather than
+  generous: `NO_PROGRESS_LIMIT` is checked *before* the phase-handoff decision and is
+  shared across both sub-agents, so a loose research budget burns most of that shared
+  allowance before Decisioning ever runs.
+- Iteration/no-progress/human-budget counters are tracked **globally across the whole
+  orchestrator run** (both sub-agents share one counter each), not reset per
+  sub-agent — a sub-agent boundary must not become a loophole around the Boundedness
+  requirement (§13).
+- Audit trail: every sub-agent's tool call is logged exactly as today
+  (`act_observe_node`'s pattern), plus which sub-agent (`research`/`decisioning`) made
+  the call — extends the existing `source: agent/human` audit field, doesn't replace
+  it, so a reviewer can tell which role was active for any given step.
+- Checkpointing: same `PostgresSaver` mechanism — an orchestrator run must survive the
+  same pause/resume-after-`ask_human` requirement as today (§13's Resumability),
+  regardless of which sub-agent triggered the interrupt.
+
+### Recovery agent (on-demand, not part of the orchestrator run)
+
+- **Purpose**: after a claim reaches `approve` or `inconclusive`, determine whether the
+  case is eligible for card-network recovery (charging back the merchant's acquiring
+  bank via Visa/Mastercard/ATM network rules) and, if eligible, assemble the supporting
+  document package. Not automatic — the Claim Processor triggers it per claim from the
+  UI (a new action, e.g. a "Check Recovery Eligibility" button on the claim detail
+  screen). Not all cases are eligible.
+- **Trigger condition — resolved 2026-08-17: `decision IN ('approve', 'inconclusive')`**,
+  gated in code (the action is hidden/disabled otherwise), not left to the Recovery
+  agent's own judgment. `deny` is excluded — the bank held the cardholder liable, no
+  credit was issued, so there's nothing to recover from the merchant.
+  `inconclusive` *is* included alongside `approve` — plausible operational rationale:
+  an inconclusive claim can already carry a provisional credit (Reg E-style rules
+  commonly require crediting the cardholder within a set number of days of a dispute,
+  before investigation concludes), so recovery can be a live question even before a
+  final determination exists. Keeping this a code gate rather than agent judgment stays
+  consistent with the same principle behind the eligibility-logic exception itself
+  (§5 above): reserve LLM judgment for what's genuinely interpretive (which reason code
+  applies), not for a fact already sitting in the `claims` table.
+- **Rule source**: a new synthetic network-rules corpus, authored the same way as the
+  existing 5-rail policy corpus (`docs/files/*.md` — ACH/CCD/DBD/ZEL/FRD), covering
+  simplified Visa/Mastercard/ATM chargeback reason codes and filing windows. Ingested
+  into Qdrant via a new/extended ingestion pass, retrieved through a new tool (e.g.
+  `search_network_policy`), parallel to `search_policy`. Tentative default: reuse the
+  existing collection with a new `claim_type` tag (e.g. `network_recovery`) rather than
+  a separate collection, consistent with Phase 3's single-collection-filtered-by-tag
+  pattern — reconsider only if there's an actual reason to split.
+- **Eligibility logic — the deliberate exception**: unlike every other check in this
+  system, recovery eligibility is **LLM-judged, not code-computed from a deterministic
+  rule**. The agent retrieves the applicable network policy and weighs it against the
+  claim's facts (claim type, dispute reason, decision, evidence already in the check
+  ledger) the way a human recovery analyst would, rather than closing on a fixed rule
+  match. This is a conscious, scoped departure from this project's usual grounding
+  philosophy — the Phase 5 `check_dispute_window` bug fix (§4 above) is the canonical
+  example of *why* that philosophy exists elsewhere in this app — justified here
+  because:
+  - The output is advisory (an audit-trail note), not a system-of-record outcome —
+    nothing else in the app reads or depends on it.
+  - It sits outside requirements.md §13's actual scope: "Determinism of decisioning" is
+    specifically about the Approve/Deny/Inconclusive outcome, which recovery
+    eligibility is not.
+  - Not all cases are eligible, and eligibility genuinely depends on network-rule
+    interpretation that's a closer fit for LLM judgment than a fixed rule table
+    (reason-code selection has real edge-case interpretation, unlike e.g. a fixed
+    dispute-window day count).
+- **Output**: no new table, no new API surface beyond the one trigger endpoint, no new
+  UI tab for now. The eligibility determination (eligible/not-eligible + reasoning) and
+  the assembled package contents (evidence list, applicable reason code, filing
+  deadline, narrative) are written as a single `audit_trail` entry (`event_type:
+  recovery_assessment`, `source: agent`) via the existing `ledger.log_audit` helper —
+  visible in the claim's existing Audit Trail tab with no frontend display changes
+  needed, just the one trigger action. A dedicated table/tab is a natural later step if
+  this gets used for real, not built now.
+- Not tied to the orchestrator's checkpointed run — a short-lived, single-purpose agent
+  invoked by a new endpoint (e.g. `POST /claims/{id}/recovery`), via `BackgroundTasks`
+  consistent with the rest of the app.
+
+### Open implementation questions (resolve before writing code)
+
+- ~~Exact LangGraph node structure for the orchestrator~~ **Resolved 2026-08-17: one
+  supervisor node, with conditional routing to Research/Decisioning sub-nodes, inside
+  a single graph** — not two separate subgraphs. Concretely: `think_research` and
+  `think_decisioning` are two distinct nodes (each its own LLM call, bound to its own
+  narrower toolset per the split above), with a `supervisor` node/conditional edge
+  deciding which one runs next based on check-ledger state (any evidence-type check
+  still UNKNOWN/BLOCKED → route to Research; otherwise → Decisioning). `act_observe`
+  stays a single shared node executing whichever tool call either sub-node produced —
+  it doesn't need to know which sub-agent it's serving, since tool execution and
+  audit-trail/check-ledger update logic is identical either way (just tagged with
+  which sub-agent originated the call, per the audit-trail bullet above). This keeps
+  one checkpointed graph (so `PostgresSaver`/resumability/global iteration counters all
+  work exactly as they do today, no cross-graph handoff to keep in sync) rather than
+  the added complexity of invoking/resuming two separate compiled graphs.
+- ~~Whether Recovery eligibility should be restricted to `decision == approve` only, or
+  also considered for other outcomes~~ **Resolved 2026-08-17: `approve` and
+  `inconclusive`, excluding `deny`** — see the Recovery agent's trigger-condition
+  bullet above.
+- `Capstone Claim Project v2.drawio` will fall out of sync with this once built (same
+  situation as the Phase 4 gap-audit notes) — update it alongside implementation this
+  time, not deferred to wrap-up.
+
+## 6. Open / To-Be-Decided
+
+All previously open items now have a decision (§1, §4, §5). Nothing outstanding at this
 time — revisit this section as implementation surfaces new gaps.

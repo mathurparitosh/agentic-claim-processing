@@ -166,9 +166,17 @@ def _derive_check_updates(claim_type: str, tool_name: str, args: dict, result: d
         check_name = args.get("check_name")
         if check_name in checks:
             answer = (result.get("answer") or "").strip().lower()
-            if answer.startswith(("yes", "confirmed", "true")):
+            # Match on the first *word*, not a raw string prefix -- a naive
+            # answer.startswith("no") also matches "not sure", "nothing on file",
+            # "november" etc., which are free-text answers a human processor could
+            # plausibly type (ClaimDetail.jsx's Yes/No buttons have a free-text
+            # fallback) and are not a "no". Found via a Phase 9 eval scenario whose
+            # deliberately-ambiguous answer ("not sure, can't confirm either way")
+            # was silently resolving to FAIL instead of the intended UNKNOWN.
+            first_word = answer.split(None, 1)[0].rstrip(",.!;:") if answer.split() else ""
+            if first_word in ("yes", "confirmed", "true", "correct", "affirmative"):
                 updates.append((check_name, "PASS", {"human_answer": result.get("answer")}))
-            elif answer.startswith(("no", "denied", "false")):
+            elif first_word in ("no", "denied", "false", "negative"):
                 updates.append((check_name, "FAIL", {"human_answer": result.get("answer")}))
             else:
                 updates.append((check_name, "UNKNOWN", {"human_answer": result.get("answer"), "note": "answer not clearly yes/no"}))

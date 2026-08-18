@@ -4,12 +4,27 @@ Runs via FastAPI BackgroundTasks so POST /claims and POST /claims/{id}/answer re
 immediately while the agent runs independently (technical.md's Background Execution row).
 """
 import json
+import os
 
 from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.types import Command
 
 from . import db
-from .agent.graph import build_graph, initial_state
+from .agent.graph import build_graph as build_legacy_graph
+from .agent.graph import initial_state
+from .agent.orchestrator import build_orchestrator_graph
+
+
+def _build_graph(checkpointer):
+    """AGENT_MODE picks which claim-processing graph runs -- 'orchestrator' (default,
+    Research/Decisioning sub-agents, specs/technical.md §5) or 'legacy' (the original
+    single-agent ReAct loop in agent/graph.py, kept as a fallback, not deleted)."""
+    mode = os.getenv("AGENT_MODE", "orchestrator").lower()
+    if mode == "orchestrator":
+        return build_orchestrator_graph(checkpointer)
+    if mode == "legacy":
+        return build_legacy_graph(checkpointer)
+    raise RuntimeError(f"Unknown AGENT_MODE: {mode!r} (expected 'orchestrator' or 'legacy')")
 
 
 def _handle_graph_result(claim_id: str, result: dict):
@@ -40,7 +55,7 @@ def run_claim_agent(claim_id: str):
             cur.execute("UPDATE claims SET status = 'processing', last_updated = now() WHERE id = %s", (claim_id,))
 
     with PostgresSaver.from_conn_string(db.DATABASE_URL) as checkpointer:
-        graph = build_graph(checkpointer)
+        graph = _build_graph(checkpointer)
         config = {"configurable": {"thread_id": claim_id}}
         result = graph.invoke(initial_state(claim_id, row["claim_type"], row["claim_payload"]), config=config)
 
@@ -52,7 +67,7 @@ def resume_claim_agent(claim_id: str, answer: str):
     status/pending_question are already updated to 'processing'/NULL by the API
     endpoint before this background task runs (backend/main.py)."""
     with PostgresSaver.from_conn_string(db.DATABASE_URL) as checkpointer:
-        graph = build_graph(checkpointer)
+        graph = _build_graph(checkpointer)
         config = {"configurable": {"thread_id": claim_id}}
         result = graph.invoke(Command(resume=answer), config=config)
 

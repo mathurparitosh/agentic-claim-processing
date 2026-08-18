@@ -168,13 +168,13 @@ Verified both paths against the real, running app rather than assumed:
 - **`LLM_PROVIDER=openai`** (default): re-ran a claim end-to-end through the actual API after the refactor — same correct `approve` outcome as before, confirming the extraction into `llm.py` didn't change behavior.
 - **`LLM_PROVIDER=openrouter`**, `OPENROUTER_MODEL=openrouter/free` (OpenRouter's own auto-router, restricted to free tool-calling-capable models — matches the working sample the user provided): first probed a single tool-calling request directly (confirms `tool_choice="required"` — which the whole agent design depends on, requirements.md §5 step 2 — is actually honored by whatever free model OpenRouter routes to, since this isn't documented/guaranteed across all providers). It correctly called `lookup_transaction` with the right args. Then ran a full claim end-to-end over real HTTP (`ACC-9002` duplicate-charge scenario): the agent correctly called `lookup_transaction`, `lookup_account_profile`, `check_duplicate_charge` (correctly resolving `duplicate_charge_check` PASS against the real TXN-2006/TXN-2007 duplicate), and `search_policy` (resolving `policy_dispute_window` PASS via Qdrant) — landing on the correct `approve` decision matching what `gpt-5.6-luna` would have produced. Confirms the whole tool-calling ReAct loop works unmodified with OpenRouter as the provider.
 
-**Known limitation, not fixed**: OpenRouter's free tier is rate-limited (50 requests/day with no credit ever purchased on the account, 20 requests/minute) — a single claim run makes 5-8 LLM calls, so this is easy to exhaust well before running a full 10-claim Phase 8 evaluation set on it. Fine for occasional/demo use or as a zero-cost fallback; not a substitute for the OpenAI path if running the full eval suite. Left as `LLM_PROVIDER=openai` after testing (matches `.env.example`'s documented default) — the user can flip it back anytime.
+**Known limitation, not fixed**: OpenRouter's free tier is rate-limited (50 requests/day with no credit ever purchased on the account, 20 requests/minute) — a single claim run makes 5-8 LLM calls, so this is easy to exhaust well before running a full 10-claim Phase 9 evaluation set on it. Fine for occasional/demo use or as a zero-cost fallback; not a substitute for the OpenAI path if running the full eval suite. Left as `LLM_PROVIDER=openai` after testing (matches `.env.example`'s documented default) — the user can flip it back anytime.
 
 ---
 
 ## Phase 6 — Frontend (React)
 
-- [x] 💻 **API surface extended for the frontend** — `backend/main.py`: added `GET /claims` (list, most-recent-first; not in the original Phase 5 endpoint list, added because the list view had no other way to discover claims that exist server-side) and `CORSMiddleware` (`localhost:5173` → `localhost:8000` for local dev; Phase 9's Nginx setup serves both same-origin in prod, so this is dev-only).
+- [x] 💻 **API surface extended for the frontend** — `backend/main.py`: added `GET /claims` (list, most-recent-first; not in the original Phase 5 endpoint list, added because the list view had no other way to discover claims that exist server-side) and `CORSMiddleware` (`localhost:5173` → `localhost:8000` for local dev; Phase 10's Nginx setup serves both same-origin in prod, so this is dev-only).
 - [x] 💻 **Password-gate screen** — `frontend/src/components/PasswordGate.jsx`. Stores the password in `sessionStorage` (cleared on tab close, not a long-lived local credential); `frontend/src/api.js`'s `request()` wrapper attaches it as `Authorization: Bearer <password>` on every call and clears it + surfaces a re-auth prompt on any `401`.
 - [x] 💻 **Claim submission form** — `frontend/src/components/ClaimForm.jsx`. Claim type (fraud/billing_dispute), account ID, disputed transaction ID, reason (dropdown covering `duplicate_charge` so that check's real computation path is reachable from the UI, not just "not applicable"), filed-at timestamp.
 - [x] 💻 **Claim list / status view** — `frontend/src/components/ClaimList.jsx`. Polls `GET /claims` every 3s independently of whichever claim is selected; status/decision badges with a pulse indicator while a claim is still in-flight (`pending`/`processing`/`awaiting_input`).
@@ -199,26 +199,358 @@ Verified both paths against the real, running app rather than assumed:
 - [x] 💻 **Two more synthetic accounts** (2026-08-16) — `ACC-9002` (Marcus Webb, `billing_dispute`, a same-merchant/same-amount duplicate charge — TXN-2006/TXN-2007, ~90 min apart, exercises `check_duplicate_charge`) and `ACC-9003` (Priya Nandakumar, `fraud`, same anomaly shape as `ACC-9001` but a different city/amount/merchant so the sample set isn't repetitive). Added as two more entries in `backend/generate_synthetic_data.py`'s `SCENARIOS` list — same LLM-generate-then-review pipeline as `ACC-9001`, not hand-written SQL. Added a `--accounts` filter flag to the script's CLI so a subset of scenarios can be (re)generated without touching the others' already-loaded data (running the full script unfiltered would have regenerated `ACC-9001` too, since the model has no seed/temperature control and each call samples fresh — see the Phase 5 LLM-swap notes above). First narrative draft asked for "6-10 transactions" per account (copied from `ACC-9001`'s wording) and generated 9 for `ACC-9002` on a dry run; tightened to "EXACTLY 7 transactions" and regenerated before loading, so all three accounts now have exactly 7 each.
 - [x] 💻 **Account-ID autocomplete + transaction dropdown on the claim form** — `frontend/src/components/ClaimForm.jsx`. Two new endpoints in `backend/main.py`: `GET /accounts` (id + member name, all fixture accounts) and `GET /accounts/{id}/transactions` (that account's transactions). Account ID is now an `<input list>` bound to a `<datalist>` of real accounts (native browser autocomplete, no new dependency); once the typed value matches a known account, the disputed-transaction field switches from free text to a `<select>` populated from that account's real transactions (labeled `TXN-2007 — $54.18 Green Valley Grocers (Denver, CO)`), defaulting to the first one. Typing an account ID that isn't in the fixture data falls back to the original free-text transaction input, so submitting a claim against a not-yet-loaded account still works. Verified over HTTP: `GET /accounts` returns all 3 accounts; `GET /accounts/ACC-9002/transactions` returns its 7 transactions including the TXN-2006/TXN-2007 duplicate pair.
 
+- [x] 💻 **Claims-list landing + in-app tab strip** (2026-08-17). New requirement from the user, changed the previous single-page sidebar+pane layout. Clarified: "new tab" means an **in-portal tab** (a tab strip inside the app, like an IDE/browser-tabs-within-a-page), not a real new browser tab — the user stays on the same browser tab throughout:
+  1. On login, the first screen is the claims list (not today's combined form+list sidebar). Clicking a claim opens it as a new in-app tab alongside any others already open.
+  2. A new **"Start Claim"** button (on the claims-list screen) opens a new in-app tab containing what today's left pane shows — the account/transaction/claim-type submission form (`ClaimForm`) — instead of that form living permanently in a sidebar.
+
+  Current state this changes: `frontend/src/App.jsx` holds one `useState`-driven view — `app-sidebar` stacks `ClaimForm` + `ClaimList`, `app-main` shows `ClaimDetail` for whichever claim is `selectedClaimId`. No tab concept exists today (no browser tabs *or* in-app tabs) — this is a single always-visible sidebar+pane layout.
+
+  Planned approach:
+  - No routing library needed (no real navigation/URL/new-browser-tab involved — dropping the earlier `react-router-dom`/`sessionStorage` plan from this item, that was based on a misreading of "new tab"). All state stays client-side in-memory for the page's lifetime, same as today.
+  - `App.jsx` gains a `tabs` array + `activeTabId` in state. Each tab is `{ id, kind: 'list' | 'detail' | 'new-claim', claimId? }`. A `list`-kind tab is created on login and is the landing view; treat it as unclosable (always at least the list tab available), matching "first screen after login is the claims list."
+  - New `TabStrip` component renders one header per open tab (label + close `×`), clicking a header sets `activeTabId`; only the active tab's content is shown (others stay mounted but hidden, so in-flight polling on a `processing`/`awaiting_input` claim detail tab keeps running in the background rather than resetting when the user tabs away and back).
+  - Clicking a claim row in `ClaimList` (which stays on the `list` tab): if a `detail` tab for that `claimId` is already open, just activate it (no duplicate tabs); otherwise open a new `detail` tab and activate it.
+  - Clicking **"Start Claim"**: opens a new `new-claim` tab (renders `ClaimForm`) and activates it. Multiple `new-claim` tabs can coexist (starting more than one claim at once is fine) — no dedupe needed here, unlike claim-detail tabs.
+  - **Open decision, defaulted for planning purposes, confirm before building**: on successful submit, the `new-claim` tab that submitted it converts in place into that claim's `detail` tab (closest to today's `handleSubmitted` behavior of immediately showing the new claim) rather than opening yet another tab or auto-closing back to the list.
+  - `ClaimList`'s existing 3s poll (`GET /claims`) needs no changes — a claim submitted from a `new-claim` tab shows up in the list tab's next poll cycle same as today.
+  - Layout/CSS (`frontend/src/index.css`): replace the current `app-sidebar` + `app-main` split with a full-width tab strip + full-width active-tab content area, since `ClaimDetail`/`ClaimForm` are no longer sharing horizontal space with a permanent sidebar.
+  - Out of scope unless requested: persisting open tabs across a full page reload (a browser refresh will reset to just the `list` tab, same as losing any other in-memory SPA state today) and reflecting the active tab in the URL/browser history/back-button.
+  - Re-run (or extend) the Phase 6 Playwright end-to-end flow to cover: login → land on claims list tab → click a claim → new in-app tab opens with that claim's detail, list tab still present → click a second claim → another in-app tab opens; clicking the first claim's tab again re-activates it rather than duplicating → click "Start Claim" → new in-app tab opens with the form → submit → confirm that tab converts to the new claim's detail and the list tab's poll picks up the new claim.
+
+  **Built as planned above**, with the open decision resolved as recommended (submit converts the `new-claim` tab into that claim's `detail` tab in place). Implementation:
+  - `frontend/src/components/TabStrip.jsx` (new) — renders tab headers (`Claims` / `New Claim` / `Claim <id prefix>`) with a close `×` on every tab except the permanent `list` tab.
+  - `frontend/src/App.jsx` rewritten — `tabs` array (`{id, kind: 'list'|'detail'|'new-claim', claimId?}`) + `activeTabId` replace the old `selectedClaimId` state. `openClaimTab` dedupes against an already-open `detail` tab for that `claimId` rather than opening a second one; `openNewClaimTab` does not dedupe (multiple `New Claim` tabs can be open at once); `closeTab` falls back to the previous tab in the strip (or the list tab) when the active tab is closed, and is a no-op on the `list` tab (permanent, no close button rendered for it). Every tab's content stays mounted and is hidden with `display: none` rather than unmounted when inactive, so an in-flight `detail` tab keeps polling `GET /claims/{id}` / `GET /claims/{id}/audit` in the background while another tab is focused.
+  - `frontend/src/components/ClaimList.jsx` — added the `Start Claim` button (`onStartClaim` prop) next to the "Claims" heading; the existing `selected` row highlight now keys off `openClaimIds` (claims that currently have an open `detail` tab) instead of a single `selectedClaimId`.
+  - `frontend/src/index.css` — replaced `.app-sidebar`/`.app-main` with `.tab-strip`/`.tab-panel`; `ClaimForm`/`ClaimList` are no longer confined to a 340px column so both got a `max-width` for readability now that they render full-page.
+  - `ClaimForm.jsx` and `ClaimDetail.jsx` needed no changes — both were already driven purely by props (`onSubmitted(claimId)` / `claimId`), so they slot into the new per-tab wrapper unchanged.
+  - **Verified in a real browser**, not just `npm run build`: no project run-skill existed yet, so used `scripts/start.sh` (already in the repo — starts local Postgres via docker compose, then `uvicorn`/`vite dev`) plus a one-off Playwright driver in the scratchpad (same pattern as the original Phase 6 browser test; `chromium-cli` still isn't available in this environment). Drove the real app end-to-end:
+    1. Logged in with the real `AUTH_PASSWORD` → landed directly on the `Claims` tab; confirmed the old `.app-sidebar` is gone and `.start-claim-btn` is present.
+    2. Clicked "Start Claim" → a `New Claim` tab opened showing `ClaimForm`, `Claims` tab stayed open.
+    3. Filled and submitted a real fraud claim (`ACC-9001`/`TXN-7001`) → the same tab converted in place to `Claim 97912f46` showing `ClaimDetail` (`Checks`/`Account & Transaction`/`Audit Trail` sub-tabs all rendered).
+    4. Switched back to the `Claims` tab → the new claim appeared in the list (poll picked it up with no manual refresh).
+    5. Clicked a claim row → its `detail` tab opened/activated, `Claims` tab remained open alongside it.
+    6. Clicked back to `Claims` then re-clicked the same row → tab count stayed the same (2), confirming no duplicate tab was opened.
+    7. Closed the active `detail` tab via its `×` → correctly fell back to the `Claims` tab.
+    8. Zero browser console errors across the whole run.
+  - Test claim (`97912f46-...`) created during this run cleaned up from the dev DB afterward (`DELETE FROM claims WHERE id = ...`; `check_ledger`/`audit_trail` rows cascade-deleted with it).
+
+  **Follow-up tweak (2026-08-17, same day)**: moved the `Start Claim` button out of `ClaimList` and into `App.jsx`'s header, directly to the left of `Log out` (new `.app-header-actions` wrapper div so `justify-content: space-between` still keeps the title left / actions right) — it's a global action, not specific to the `Claims` tab's content, and clicking it now works from any tab, not just while `Claims` is active. `ClaimList` no longer takes an `onStartClaim` prop. Also changed `.claim-list` from `max-width: 640px` to `width: 100%` so claim rows fill the tab panel's full width instead of stopping short. Verified visually via the same Playwright setup: header renders `Start Claim` immediately left of `Log out`, and `.claim-list`'s rendered width now matches the tab panel's content width (only the panel's own padding accounts for the gap to the edge). No console errors.
+
+  **Follow-up: per-claim summary pane (2026-08-17, same day)**. Each `Claim` tab's detail view now has a left-hand summary pane showing basic info at a glance — Account (ID + name), Transaction (reference, merchant, amount), and Dispute type — without needing to switch to the existing "Account & Transaction" tab (which stays as-is for the full detail: standing, opened date, dispute history count, fraud red flags, transaction location/channel/status). `frontend/src/components/ClaimDetail.jsx`: new `SummaryPane` subcomponent, sourced from data already being fetched — `context` (`GET /claims/{id}/context`, same call `ContextPanel` uses) for account/transaction, and `claim.claim_payload.reason` (the value chosen in `ClaimForm`'s `Reason` dropdown — `unauthorized_transaction`/`not_recognized`/`duplicate_charge`/`other`) for dispute type, which the API already returns on `GET /claims/{id}` but nothing previously surfaced in the UI. The claim-detail render now wraps in a `.claim-detail-layout` flex row: `SummaryPane` (fixed 220px) + the existing `.claim-detail` column (flexible). `frontend/src/index.css` adds `.claim-detail-layout`/`.claim-summary-pane`/`.summary-section`/`.summary-value`. No backend changes needed — both data sources were already in the API response, just not displayed. Verified in a real browser: opened a real `billing_dispute` claim, summary pane correctly showed `ACC-9001` / `Dana Ruiz` / `TXN-1004` / `Walgreens Pharmacy` / `$58.45` / `Unauthorized Transaction`, matching the claim's actual data; no console errors.
+
 ---
 
-## Phase 7 — Observability & Audit
+## Phase 7 — Multi-Agent Orchestration (Research / Decisioning) + On-Demand Recovery Agent
 
-- [ ] 💻 Wire LangSmith tracing using the Phase 0 credentials
+Built 2026-08-17. Architecture design in `technical.md` §5. Two independent pieces of
+work, not three peer agents in one loop: the orchestrator graph is a refactor of the
+default claim-processing path (Research + Decisioning sub-agents); the Recovery agent
+is new, separate, on-demand functionality triggered per claim after a decision already
+exists.
+
+### Orchestrator graph (Research + Decisioning sub-agents)
+
+- [x] 💻 Design the LangGraph node structure for the orchestrator — **one supervisor
+  node routing between two sub-nodes** (`think_research` / `think_decisioning`, each
+  its own LLM call bound to its own narrower toolset) inside a single graph, sharing
+  one `act_observe` node and one checkpointer — not two separate subgraphs.
+- [x] 💻 Built as `backend/agent/orchestrator.py` (new file). `backend/agent/graph.py`
+  (the legacy single agent) is **completely unmodified** — `orchestrator.py` imports
+  its shared, unmodified business-rule helpers (`_derive_check_updates`,
+  `_format_checks`, `ClaimState`, `finalize_node`, the iteration caps) rather than
+  duplicating them, so the check-ledger/decision rules can never drift between the two
+  paths. `act_observe_node` and the two think-nodes are new code in `orchestrator.py`
+  (couldn't be shared as-is — they needed the sub_agent-tagging/role-switching logic
+  below), so there is some deliberate duplication of the tool-execution loop shape
+  between the two files; the actual business rules inside it are shared via import.
+- [x] 💻 Split the existing tool bindings: Research agent gets Grounding + Retrieval
+  tools only (`lookup_transaction`, `lookup_account_profile`, `lookup_access_logs`,
+  `search_policy`); Decisioning agent gets Computation tools
+  (`check_duplicate_charge`, `check_transaction_anomaly`) + `ask_human` +
+  `write_determination`.
+- [x] 💻 Global iteration/no-progress/human-question counters shared across both
+  sub-agents (not reset per sub-agent) — same termination rules as today
+  (requirements.md §5), enforced across the two-role loop instead of one.
+- [x] 💻 Final decision stays computed by the existing `compute_decision(check_ledger)`
+  — `orchestrator.py` imports and reuses `graph.py`'s `finalize_node` directly,
+  unchanged. Never asserted by either sub-agent (requirements.md §13's determinism
+  requirement).
+- [x] 💻 Audit trail: every `tool_call` entry now carries a `sub_agent`
+  (`"research"`/`"decisioning"`) field alongside the existing `source: agent/human`
+  field.
+- [x] 💻 New env var `AGENT_MODE=orchestrator|legacy` (`.env.example`/`.env.local`,
+  mirrors `LLM_PROVIDER`'s switch pattern) — orchestrator is the new default;
+  `backend/worker.py`'s `_build_graph()` picks between `build_orchestrator_graph` and
+  `graph.py`'s unmodified `build_graph` (the legacy path, kept as a fallback, not
+  deleted).
+- [x] 💻 New comparison smoke test, `backend/smoke_test_orchestrator.py` — runs every
+  scenario in `backend/generate_synthetic_data.py` (`ACC-9001` fraud, `ACC-9002`
+  billing_dispute/duplicate_charge, `ACC-9003` fraud) through **both** the legacy graph
+  and the orchestrator graph and diffs decision + full check ledger. All three matched
+  exactly after the bug fix below.
+
+  **Bug found and fixed via this smoke test**: the first routing design handed off from
+  Research to Decisioning only once every research-owned check left `UNKNOWN`
+  (`PASS`/`FAIL`/`BLOCKED`) — but `account_standing` (and `account_red_flags`) can stay
+  `UNKNOWN` forever with no research tool able to change that (`lookup_account_profile`
+  returning "not found" never produces `BLOCKED`, just `UNKNOWN`). Tested against a
+  claim with a deliberately hidden account profile: the orchestrator looped in Research
+  for the full run and hit the *global* no-progress cap before Decisioning — and
+  therefore `ask_human`, which only Decisioning owns — ever got a turn. Landed
+  `inconclusive` instead of correctly escalating to a human, a real behavior regression
+  vs. the legacy single agent (which has `ask_human` available immediately, no
+  structural phase to get stuck in).
+
+  Fixed in `orchestrator.py`'s `route_after_act`: Research now also hands off once its
+  iteration budget runs out, not only once nothing is left `UNKNOWN`. The budget is
+  `len(research-owned checks in this claim) + RESEARCH_ITERATION_BUFFER` (buffer = 2)
+  — deliberately tight rather than generous, since `NO_PROGRESS_LIMIT` (5) is checked
+  *before* the phase-handoff decision and is shared across both sub-agents; a loose
+  budget burns most of that shared allowance in Research before Decisioning ever runs.
+  Re-tested the same hidden-account-profile claim after the fix: Research handed off
+  after 5 rounds, Decisioning correctly called `ask_human`
+  (`"Is account ACC-9002 in good standing...?"`), the run paused, and resuming with
+  `"yes"` (via a **freshly constructed** checkpointer/graph instance, simulating a
+  process restart — same resumability check as the original Phase 4 test) completed
+  correctly: `account_standing: PASS (human_answer: "yes")`, overall `approve`. Re-ran
+  the 3-scenario comparison after the fix too — still all-match, the fix didn't
+  perturb the claims that resolve cleanly through Research alone.
+
+### Recovery agent (new, on-demand, not part of the orchestrator run)
+
+- [x] 💻 New synthetic network-rules corpus: `docs/files/NWR_Network_Recovery.md` (13
+  provisions — Visa/Mastercard/ATM reason codes, filing windows, evidence/package
+  requirements, exclusions), same clause-heading format as the existing 5-rail corpus
+  so the existing chunker parses it unmodified.
+- [x] 💻 Ingested into the existing Qdrant collection (`claims-policy-corpus`) tagged
+  `claim_type: network_recovery` — `scripts/ingest_policy_corpus.py`'s
+  `CLAIM_TYPE_BY_DOC_ID` gained one entry (`"NWR": "network_recovery"`), no other
+  ingestion-script changes needed. Re-running the script is idempotent (existing
+  `uuid5`-keyed upsert), so this added exactly the 13 new `network_recovery` chunks
+  without touching the 101 already-ingested `billing_dispute`/`fraud` ones. Corpus now
+  114 chunks total.
+- [x] 💻 New retrieval tool `search_network_policy` (`backend/agent/tools.py`) —
+  parallel to `search_policy` but hardcoded to the `network_recovery` filter (no
+  `claim_type` parameter needed, unlike `search_policy`, since there's only one such
+  corpus). Deliberately **not** added to the orchestrator's `TOOLS`/`RESEARCH_TOOLS`/
+  `DECISIONING_TOOLS` — it's exclusively for the Recovery agent's own direct use, never
+  reachable from the main claim-processing loop.
+- [x] 💻 New Recovery agent, `backend/agent/recovery.py` (`assess_recovery(claim_id)`)
+  — **eligibility is LLM-judged, not a deterministic check-ledger closure**, per the
+  deliberate, scoped exception in technical.md §5. Implemented as a single retrieval
+  call + one `with_structured_output` LLM call (Pydantic `RecoveryAssessment` schema:
+  `eligible`, `reasoning`, `network`, `reason_code`, `filing_deadline`,
+  `evidence_summary`, `narrative`) — not a multi-turn tool-calling loop, since the task
+  is a one-shot judgment, not an evidence-gathering process. `backend/agent/llm.py`
+  refactored (`_build_base_model()` extracted, shared by `build_agent_model` and the
+  new `build_structured_model`) rather than duplicating the provider-selection
+  boilerplate. Verified live: `with_structured_output` works correctly against
+  `gpt-5.6-luna` over the Responses API (`use_responses_api=True`) — this was the one
+  genuinely uncertain integration point going in, confirmed rather than assumed.
+- [x] 💻 New endpoint `POST /claims/{claim_id}/recovery` (`backend/main.py`) —
+  code-gated to `decision IN ('approve', 'inconclusive')` (409 otherwise, matching the
+  existing `answer_claim` pattern), 404 on an unknown claim id. Runs **synchronously**
+  (not via `BackgroundTasks`) — a single retrieval + one LLM call is a few seconds,
+  not a multi-minute loop, so there's no need for the polling pattern the main claim
+  run uses; the response carries the full result directly. Writes one `audit_trail`
+  entry (`event_type: recovery_assessment`) via the existing `ledger.log_audit` — no
+  new table, no new read endpoint.
+- [x] 💻 Frontend: `frontend/src/components/ClaimDetail.jsx` gained a "Check Recovery
+  Eligibility" button inside the existing decision box, rendered only when
+  `claim.decision` is `approve` or `inconclusive` (a `deny`'d claim never shows the
+  button at all, not just a disabled one — mirrors the endpoint's gate). On click:
+  calls the new endpoint, refetches the audit trail, and switches to the Audit Trail
+  sub-tab so the result is immediately visible (same expand-to-see-full-JSON
+  interaction as every other audit row — no new display component needed).
+  `frontend/src/api.js` gained `checkRecoveryEligibility(claimId)`.
+- [x] 💻 **Verified end-to-end in a real browser** (Playwright, same pattern as prior
+  phases): submitted a real `billing_dispute`/`duplicate_charge` claim against
+  `ACC-9002`'s known `TXN-2006`/`TXN-2007` duplicate pair, waited for it to resolve via
+  the orchestrator (`Approved`), clicked "Check Recovery Eligibility," confirmed the
+  view switched to Audit Trail and a `recovery_assessment` entry appeared showing a
+  correctly-grounded result (network `Mastercard`, reason code `4834`, citing the
+  actual retrieved `NWR-3.2`/`NWR-3.3` provisions, not a hallucinated answer). Zero
+  console errors. Also verified over direct HTTP: 409 on a `deny`'d claim, 404 on an
+  unknown claim id, 401 with no auth header.
+- [x] 💻 Diagram (`Capstone Claim Project v2.drawio`) update — done. The single
+  `agent` cell ("ReAct Agent (LangGraph)") is now a dashed boundary box
+  ("Orchestrator Graph (LangGraph supervisor)") containing two child boxes,
+  "Research Sub-Agent (Grounding + Retrieval tools)" and "Decisioning Sub-Agent
+  (Computation + ask_human + write_determination)", with a small routing edge
+  between them labeled "hand off once research-owned checks resolved or budget
+  exhausted". Existing THINK/ACT/OBSERVE/ledger/audit/observability edges (e5-e9,
+  e15) were left targeting the boundary cell (kept the id `agent`) rather than
+  repointed to a specific sub-node — a documentation diagram, not a literal render,
+  and the boundary-as-target reads cleanly. Added a new, visually separate "Recovery
+  Agent (on-demand)" box (not inside the orchestrator boundary), with edges to
+  `m_semantic` (labeled `search_network_policy (network_recovery filter)`), to
+  `audit` (labeled `log_audit(recovery_assessment)`), and a dashed edge from
+  `frontend` labeled "Check Recovery Eligibility → POST /claims/{id}/recovery
+  (synchronous, not BackgroundTasks)" — not routed through the `orchestrator` box
+  since the endpoint runs synchronously. `t_retrieval` and `m_semantic` updated
+  Pinecone → Qdrant; `t_retrieval`'s "k=20→GPT rerank→top3" corrected to "k=20 →
+  relevance floor (0.5) → top-3" (there was never a reranker — this was wrong before
+  Phase 7 too, just never fixed). `observability` label dropped "Not wired up yet"
+  now that LangSmith tracing is live. Canvas bumped from 850x1100 to 1250x950 to fit
+  the new boundary/sub-nodes and Recovery Agent row without overlapping existing
+  shapes. Verified with `python3 -c "import xml.etree.ElementTree as ET;
+  ET.parse('specs/Capstone Claim Project v2.drawio')"` — parses clean.
+- [x] 💻 `docs/c4-architecture.md` is now stale too (found while implementing, not
+  previously flagged): its Level 3 component diagram and sequence diagram both
+  described `graph.py`'s single-agent node structure (`init -> think -> act_observe
+  -> ...`) as *the* agent architecture, which is no longer accurate now that the
+  orchestrator is the default (`AGENT_MODE=orchestrator`). Fixed — see the `Diagram`
+  entry below, which covers both docs.
+
+### Diagram
+
+- [x] 💻 `Capstone Claim Project v2.drawio` will fall out of sync with this once
+  built (same situation as the Phase 4 gap-audit notes) — update it alongside
+  implementation this time, not deferred to Phase 11 wrap-up. Updated (see the
+  detailed bullet above); `docs/c4-architecture.md` updated alongside it in the same
+  pass since it had drifted for the same underlying reason. Level 1/2 System
+  Context/Container diagrams: dropped LangSmith's "not wired up yet (Phase 8)"
+  framing (`.env.local` now has real `LANGSMITH_TRACING`/`LANGSMITH_API_KEY`/
+  `LANGSMITH_ENDPOINT`/`LANGSMITH_PROJECT`, loaded via `backend/db.py`'s
+  `load_dotenv()` before any LLM calls — auto-instrumented, no app code needed);
+  added a Level-2 note on the Recovery agent's synchronous (non-BackgroundTasks)
+  execution inside the same "API & Agent Backend" container. Level 3 gained
+  `orchestratorC` (`backend/agent/orchestrator.py`) and `recoveryC`
+  (`backend/agent/recovery.py`) components plus `search_network_policy` on
+  `toolsC`; `graphC` relabeled "Agent Graph (legacy)" with its fallback role noted;
+  `worker`'s description updated for `_build_graph()`'s
+  `build_orchestrator_graph`/`build_graph` choice; `llmC` updated for
+  `build_structured_model` (the `_build_base_model()` refactor); notes section
+  expanded to explain that `orchestrator.py` imports `graph.py`'s
+  `_derive_check_updates`/`_format_checks`/`ClaimState`/`finalize_node`/iteration
+  caps rather than duplicating them (the important architectural fact — business
+  rules are shared, only the tool-execution loop *shape* is duplicated), and that
+  Recovery's `eligible` judgment is a deliberate, scoped exception to "`checks.py` is
+  the only place a decision is computed" (LLM-judged, advisory, not a
+  `compute_decision` run). Added `POST /claims/{id}/recovery` to the
+  "endpoints not shown individually" list. Level 4: left the Think/Act/Observe
+  sequence diagram's shape as-is (still accurate at this zoom — same
+  `graph.invoke`/`Command(resume=...)`/checkpointing mechanics either way) and added
+  a prose note clarifying "Think" now covers Research and Decisioning turns sharing
+  that loop, plus a new short sequence diagram for the Recovery agent's separate
+  synchronous one-shot flow (`POST /claims/{id}/recovery` → one retrieval + one
+  structured LLM call → one `audit_trail` write → response, including the 409 gate).
+  Top-of-file date bumped to 2026-08-17 with a one-line summary of what changed.
+
+---
+
+## Phase 8 — Observability & Audit
+
+- [x] 💻 **Wire LangSmith tracing using the Phase 0 credentials** (2026-08-17). No
+  application code needed — `LANGSMITH_TRACING=true`, `LANGSMITH_API_KEY`,
+  `LANGSMITH_ENDPOINT` (`https://api.smith.langchain.com`), and
+  `LANGSMITH_PROJECT=claim-assistant` were already present in `.env.local` from Phase 1,
+  loaded via `backend/db.py`'s `load_dotenv()` (which every entrypoint imports before any
+  LLM call runs). LangChain/LangGraph auto-instrument tracing purely from those env vars.
+  Verified live, not just assumed: `langsmith.Client().read_project(project_name="claim-assistant")`
+  round-tripped successfully against the real API using the configured key, confirming
+  both the credentials are valid and the project exists — actual trace volume will
+  accumulate as the agent runs (Phase 9's eval runs below exercise this).
 - [ ] 💻 Confirm `audit_trail` rows are written for every tool call, retrieval detail, and final determination (requirements.md §11)
 - [ ] 💻 Manual check: pull up one LangSmith trace and the corresponding `audit_trail` rows side by side — confirm they tell the same story
 
 ---
 
-## Phase 8 — Evaluation (10 test claims)
+## Phase 9 — Evaluation (10 test claims)
 
-- [ ] 💻 Design 10 claims spanning claim types + evidence-completeness levels, each with a predetermined expected outcome (requirements.md §12) — write these out (e.g. a markdown table) before generating synthetic evidence for them
-- [ ] 💻 Generate synthetic evidence per claim (Phase 4 generator)
-- [ ] 💻 Jupyter notebook: run all 10 through the agent, compare actual vs. expected decision + check trace
-- [ ] 💻 Fix discrepancies; re-run until the eval set passes, or document known gaps
+Built 2026-08-17.
+
+- [x] 💻 **Design 10 claims spanning claim types + evidence-completeness levels, each
+  with a predetermined expected outcome** — [`specs/eval_claims.md`](eval_claims.md),
+  written before any of the 7 new scenarios' evidence was generated. Reused the 3
+  Phase-4-era scenarios (`ACC-9001`/9002/9003, all clean-Approve) and added 7 more
+  (`ACC-9004`-`9010`) specifically to exercise paths the original 3 never touched: a
+  `FAIL`-short-circuit Deny from bad account standing (#4), a Deny from an *unfounded*
+  duplicate-charge claim where no actual duplicate exists (#5), Approve/Deny reached
+  only via `ask_human` because the account's `account_profiles` row is deliberately
+  never loaded (#6 human answers "yes", #7 human answers "no"), a Deny from a disputed
+  transaction id that doesn't exist on the account at all (#8), a Deny from a fraud
+  claim where the transaction turns out *not* to be anomalous (#9), and an Inconclusive
+  where the one unresolvable check stays `UNKNOWN` even after the human is asked,
+  because their answer is genuinely ambiguous (#10). Final mix: 6 fraud / 4
+  billing_dispute, 4 Approve / 5 Deny / 1 Inconclusive.
+
+- [x] 💻 **Generate synthetic evidence per claim** — `backend/generate_synthetic_data.py`.
+  Extended `SCENARIOS` with the 7 new entries above (narratives + `expect` blocks per
+  the existing Phase-4 pattern) and extended `review_scenario`'s automated-review
+  vocabulary with four new expectation keys these scenarios needed:
+  `access_logs.no_risk_flag`, `disputed_transaction.location_in_history`,
+  `disputed_transaction.amount_not_over_avg_multiple` (asserts the disputed amount
+  stays under N× the account's own average, i.e. "this genuinely isn't anomalous"),
+  and `no_duplicate_for_disputed` (asserts no other transaction shares amount+merchant
+  within 24h of the disputed one, i.e. "the member's duplicate claim is mistaken").
+  Added a `load_account_profile: False` scenario flag (`load_scenario` skips the
+  `account_profiles` INSERT, and issues a `DELETE` instead so re-running is still
+  idempotent) for #6/#7/#10's missing-profile design. Also added a 3-attempt retry
+  loop around generate-then-review in `main()`, since generation is stochastic — one
+  scenario (#7) needed 2 retries before its generated data matched the `expect` block,
+  the rest passed first try. All 7 generated and loaded cleanly; verified against the
+  DB directly (`account_profiles` correctly has no row for `ACC-9006`/9007/9010, all 10
+  accounts have exactly 7 transactions).
+
+  **Bug found and fixed while writing scenario #7's data**: its
+  `disputed_transaction_ref` (used internally by the generator to identify "the
+  disputed transaction" in the generated JSON) was set to `TXN-7007`, but the
+  narrative and `claim_payload.disputed_transaction_id` both said `TXN-7107` — a
+  copy-paste mismatch from adjusting the account's transaction-ref range to avoid
+  colliding with `ACC-9001`'s `TXN-7001`. Caught immediately by the automated review
+  ("disputed transaction not found in generated transactions") on the first dry run,
+  before anything was loaded; fixed by correcting `disputed_transaction_ref` to match.
+
+- [x] 💻 **Jupyter notebook: run all 10 through the agent, compare actual vs. expected
+  decision + check trace** — `backend/eval_notebook.ipynb`. Same run pattern as
+  `backend/smoke_test_orchestrator.py` (`insert_claim` → `build_orchestrator_graph`
+  (the current `AGENT_MODE=orchestrator` default) → `graph.invoke` → resume through any
+  `ask_human` interrupts → read back `claims.decision` + full `check_ledger`), extended
+  with a per-scenario `HUMAN_ANSWERS` auto-responder (`"yes"`/`"no"`/an intentionally
+  ambiguous string, matching `specs/eval_claims.md`'s answer script) instead of always
+  answering `"yes"`, and a final cleanup cell that deletes the 10 claims it created
+  (`check_ledger`/`audit_trail` cascade with them) so re-running doesn't accumulate
+  rows in the dev DB. `jupyter`/`nbformat`/`ipykernel`/`pandas` added to
+  `backend/requirements.txt` (dev/eval-only, not needed to run the app) since none were
+  previously installed. Executed for real via
+  `jupyter nbconvert --to notebook --execute --inplace backend/eval_notebook.ipynb`
+  against the live dev Postgres + Qdrant + `gpt-5.6-luna` — not just eyeballed in the
+  UI. Result: **10/10 claims matched their predetermined expected decision** on the
+  first fully-passing run (~100s wall-clock for all 10, reasoning-model latency
+  included).
+
+- [x] 💻 **Fix discrepancies; re-run until the eval set passes** — one real
+  discrepancy was found and fixed (not just scenario-authoring mistakes, an actual
+  agent-code bug):
+
+  **Bug found and fixed: `ask_human` answer parsing matched on a raw string prefix,
+  not a word boundary.** `backend/agent/graph.py`'s `_derive_check_updates` decided
+  PASS/FAIL/UNKNOWN for a human's free-text answer via
+  `answer.startswith(("no", "denied", "false"))` — which also matches any answer
+  merely *beginning with the letters "no"*, such as "not sure", "nothing on file", or
+  "november". Scenario #10 was deliberately designed to test the Inconclusive path
+  with an ambiguous human answer ("not sure, can't confirm either way") and instead
+  landed **Deny**, because `"not sure...".startswith("no")` is `True` in Python. This
+  isn't just a test-harness quirk: `ClaimDetail.jsx`'s `ask_human` UI has a free-text
+  fallback alongside its Yes/No buttons (Phase 6), so a real claim processor typing an
+  honestly uncertain answer would have hit the exact same misclassification in
+  production. Fixed in `backend/agent/graph.py` (the single shared
+  `_derive_check_updates`, imported unchanged by `orchestrator.py` too, so both agent
+  paths got the fix at once): now matches on the answer's first whitespace-delimited
+  word (punctuation-stripped) against the yes/no synonym sets, rather than a prefix of
+  the whole string. Re-ran scenario #10 alone first to confirm the fix (correctly
+  landed Inconclusive, `account_red_flags` left `UNKNOWN` after two ambiguous answers
+  exhausted meaningful progress), then re-ran all 10 together — 10/10 matched, no
+  regressions in the other 9 (none of which depend on this code path except #6/#7,
+  whose clean "yes"/"no" answers were never affected by the bug).
+
+  No other discrepancies found — every other scenario matched its expected outcome
+  on the first real run, so no known gaps to document here.
 
 ---
 
-## Phase 9 — Deployment (your Ubuntu server)
+## Phase 10 — Deployment (your Ubuntu server)
 
 - [ ] 🌐 SSH into the server
 - [ ] 🌐 Install system packages: Python 3.11+, Node.js/npm, PostgreSQL server, Nginx, git
@@ -235,7 +567,7 @@ Verified both paths against the real, running app rather than assumed:
 
 ---
 
-## Phase 10 — Capstone Wrap-up
+## Phase 11 — Capstone Wrap-up
 
 - [ ] 💻 Record/prepare a demo walkthrough referencing requirements.md and technical.md
 - [ ] 💻 Confirm technical.md and the `.drawio` diagram still match what was actually built; update if implementation diverged

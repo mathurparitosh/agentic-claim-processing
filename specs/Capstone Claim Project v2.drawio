@@ -1,6 +1,6 @@
 <mxfile host="app.diagrams.net">
   <diagram name="Page-1" id="UUiGwtdGZkHbdog2t5Zd">
-    <mxGraphModel grid="1" page="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+    <mxGraphModel grid="1" page="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" pageScale="1" pageWidth="1250" pageHeight="950" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
@@ -19,10 +19,19 @@
         <mxCell id="orchestrator" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="Adjudication Orchestrator&#xa;(FastAPI BackgroundTasks)&#xa;survives pauses" vertex="1">
           <mxGeometry height="60" width="150" x="320" y="295" as="geometry" />
         </mxCell>
-        <mxCell id="agent" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" value="ReAct Agent (LangGraph)&#xa;&#xa;LLM proposes · harness executes" vertex="1">
-          <mxGeometry height="90" width="190" x="540" y="280" as="geometry" />
+        <mxCell id="agent" parent="1" style="rounded=0;whiteSpace=wrap;html=1;dashed=1;fillColor=none;strokeColor=#6c8ebf;verticalAlign=top;fontStyle=1;fontSize=10;" value="Orchestrator Graph (LangGraph supervisor)&#xa;default path — AGENT_MODE=orchestrator" vertex="1">
+          <mxGeometry height="200" width="220" x="530" y="250" as="geometry" />
         </mxCell>
-        <mxCell id="observability" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fontSize=9;dashed=1;fillColor=#f5f5f5;strokeColor=#666666;" value="Observability&#xa;(LangSmith — dev tracing,&#xa;distinct from Audit Trail)" vertex="1">
+        <mxCell id="sub_research" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=9;" value="Research Sub-Agent&#xa;(Grounding + Retrieval tools)&#xa;LLM proposes · harness executes" vertex="1">
+          <mxGeometry height="70" width="190" x="545" y="280" as="geometry" />
+        </mxCell>
+        <mxCell id="sub_decisioning" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=9;" value="Decisioning Sub-Agent&#xa;(Computation + ask_human +&#xa;write_determination)" vertex="1">
+          <mxGeometry height="70" width="190" x="545" y="365" as="geometry" />
+        </mxCell>
+        <mxCell id="e_route" edge="1" parent="1" source="sub_research" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=8;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" target="sub_decisioning" value="hand off once research-owned&#xa;checks resolved or budget exhausted">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="observability" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fontSize=9;dashed=1;fillColor=#f5f5f5;strokeColor=#666666;" value="Observability&#xa;(LangSmith — configured, live dev&#xa;tracing; distinct from Audit Trail)" vertex="1">
           <mxGeometry height="55" width="150" x="770" y="300" as="geometry" />
         </mxCell>
         <mxCell id="ledger" parent="1" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#d5e8d4;strokeColor=#82b366;" value="Check Ledger (Postgres)&#xa;PASS / FAIL /&#xa;UNKNOWN / BLOCKED" vertex="1">
@@ -34,7 +43,7 @@
         <mxCell id="toolbox" parent="1" style="rounded=0;whiteSpace=wrap;html=1;dashed=1;fillColor=none;verticalAlign=top;fontStyle=1" value="Tool Layer" vertex="1">
           <mxGeometry height="180" width="510" x="400" y="470" as="geometry" />
         </mxCell>
-        <mxCell id="t_retrieval" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fontSize=9;" value="Retrieval&#xa;claim/dispute history&#xa;policy search&#xa;(Pinecone; k=20→GPT rerank→top3)" vertex="1">
+        <mxCell id="t_retrieval" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fontSize=9;" value="Retrieval&#xa;claim/dispute history&#xa;policy search&#xa;(Qdrant; k=20 → relevance floor (0.5) → top-3)" vertex="1">
           <mxGeometry height="65" width="150" x="420" y="510" as="geometry" />
         </mxCell>
         <mxCell id="t_grounding" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fontSize=10;" value="Grounding&#xa;txn evidence · cardholder verify&#xa;doc extract (+ citations)" vertex="1">
@@ -52,7 +61,7 @@
         <mxCell id="membox" parent="1" style="rounded=0;whiteSpace=wrap;html=1;dashed=1;fillColor=none;verticalAlign=top;fontStyle=1" value="Long-Term Memory (cross-claim)" vertex="1">
           <mxGeometry height="180" width="170" x="950" y="470" as="geometry" />
         </mxCell>
-        <mxCell id="m_semantic" parent="1" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=10;fontSize=9;" value="Semantic&#xa;policy corpus, bulletins&#xa;(Pinecone, versioned)" vertex="1">
+        <mxCell id="m_semantic" parent="1" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=10;fontSize=9;" value="Semantic&#xa;policy corpus, bulletins&#xa;(Qdrant, claim_type-filtered&#xa;billing_dispute / fraud / network_recovery)" vertex="1">
           <mxGeometry height="60" width="140" x="965" y="505" as="geometry" />
         </mxCell>
         <mxCell id="m_episodic" parent="1" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=10;fontSize=9;" value="Episodic&#xa;entity facts keyed by account/cardholder&#xa;(Postgres: episodic_facts, provenance-tagged)" vertex="1">
@@ -149,6 +158,34 @@
             <Array as="points">
               <mxPoint x="295" y="340" />
               <mxPoint x="295" y="355" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="recovery" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=9;" value="Recovery Agent (on-demand)&#xa;not part of the orchestrator loop&#xa;search_network_policy + one&#xa;with_structured_output call" vertex="1">
+          <mxGeometry height="70" width="210" x="380" y="780" as="geometry" />
+        </mxCell>
+        <mxCell id="e17" edge="1" parent="1" source="frontend" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;dashed=1;fontSize=9;exitX=0;exitY=0.75;exitDx=0;exitDy=0;entryX=0;entryY=0.3;entryDx=0;entryDy=0;" target="recovery" value="Check Recovery Eligibility →&#xa;POST /claims/{id}/recovery&#xa;(synchronous, not BackgroundTasks)">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="100" y="340" />
+              <mxPoint x="100" y="801" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e18" edge="1" parent="1" source="recovery" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=9;exitX=1;exitY=0.3;exitDx=0;exitDy=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" target="m_semantic" value="search_network_policy&#xa;(network_recovery filter)">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="620" y="801" />
+              <mxPoint x="1035" y="801" />
+              <mxPoint x="1035" y="565" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e19" edge="1" parent="1" source="recovery" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=9;exitX=0;exitY=0.3;exitDx=0;exitDy=0;entryX=0;entryY=0.7;entryDx=0;entryDy=0;" target="audit" value="log_audit(recovery_assessment)&#xa;one new audit_trail entry">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="300" y="801" />
+              <mxPoint x="300" y="141" />
             </Array>
           </mxGeometry>
         </mxCell>

@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 from . import db
 from . import worker
-from .agent import ledger
+from .agent import ledger, recovery
 
 app = FastAPI()
 
@@ -276,6 +276,32 @@ def get_decision(claim_id: str):
         "decision_reason": row["decision_reason"],
         "checks": checks,
     }
+
+
+RECOVERY_ELIGIBLE_DECISIONS = {"approve", "inconclusive"}
+
+
+@claims_router.post("/claims/{claim_id}/recovery")
+def check_recovery_eligibility(claim_id: str):
+    """On-demand Recovery agent trigger (specs/technical.md §5, tracker.md Phase 7).
+    Gated in code to decision IN ('approve', 'inconclusive') -- a 'deny'd claim never
+    had a credit issued, so there's nothing to recover from the merchant (NWR-1.1).
+    Runs synchronously: a single retrieval call + one structured-output LLM call, not
+    a multi-minute agent loop, so there's no need for the BackgroundTasks/polling
+    pattern the main claim run uses."""
+    with db.get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT decision FROM claims WHERE id = %s", (claim_id,))
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="claim not found")
+            if row["decision"] not in RECOVERY_ELIGIBLE_DECISIONS:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"claim decision {row['decision']!r} is not recovery-eligible (must be approve or inconclusive)",
+                )
+
+    return recovery.assess_recovery(claim_id)
 
 
 app.include_router(claims_router)

@@ -89,4 +89,8 @@ export function answerQuestion(claimId, answer) {
   });
 }
 
+export function checkRecoveryEligibility(claimId) {
+  return request(`/claims/${claimId}/recovery`, { method: 'POST' });
+}
+
 export { UnauthorizedError };
