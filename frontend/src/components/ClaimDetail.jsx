@@ -14,10 +14,10 @@ const ACTIVE_STATUSES = new Set(['pending', 'processing', 'awaiting_input']);
 const RECOVERY_ELIGIBLE_DECISIONS = new Set(['approve', 'inconclusive']);
 const TABS = [
   { id: 'checks', label: 'Checks' },
-  { id: 'agentcontext', label: 'Context' },
-  { id: 'memory', label: 'Memory' },
   { id: 'context', label: 'Account & Transaction' },
   { id: 'audit', label: 'Audit Trail' },
+  { id: 'agentcontext', label: 'Context' },
+  { id: 'memory', label: 'Memory' },
   { id: 'subagents', label: 'Sub-agents' },
 ];
 
