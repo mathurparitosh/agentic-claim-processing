@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 
 from .. import db
 from . import ledger
-from .llm import build_structured_model
+from .llm import active_model_name, active_provider, build_structured_model
 from .tools import search_network_policy
 
 
@@ -86,6 +86,14 @@ def assess_recovery(claim_id: str) -> dict:
         "query": query,
         "retrieved_policy": policy_result,
         "assessment": assessment.model_dump(),
+        "model": active_model_name(),
+        "provider": active_provider(),
     }
-    ledger.log_audit(claim_id, "recovery_assessment", payload, "agent")
+    ledger.log_audit(
+        claim_id,
+        "recovery_assessment",
+        payload,
+        "agent",
+        event_subtype="eligible" if assessment.eligible else "not_eligible",
+    )
     return payload

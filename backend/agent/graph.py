@@ -15,7 +15,7 @@ from langgraph.graph.message import add_messages
 
 from . import episodic, ledger
 from .checks import REQUIRED_CHECKS
-from .llm import build_agent_model
+from .llm import active_model_name, active_provider, build_agent_model
 from .tools import HUMAN_QUESTION_BUDGET, TOOLS
 
 MAX_ITERATIONS = 12
@@ -98,7 +98,18 @@ def init_node(state: ClaimState) -> dict:
     account_id = payload.get("account_id")
     known_facts = episodic.get_facts(account_id, "account") if account_id else {}
 
-    ledger.log_audit(claim_id, "run_started", {"claim_type": claim_type, "claim_payload": payload}, "agent")
+    ledger.log_audit(
+        claim_id,
+        "run_started",
+        {
+            "claim_type": claim_type,
+            "claim_payload": payload,
+            "agent_mode": "legacy",
+            "model": active_model_name(),
+            "provider": active_provider(),
+        },
+        "agent",
+    )
 
     return {
         "checks": checks,
@@ -113,8 +124,22 @@ def init_node(state: ClaimState) -> dict:
 
 
 def think_node(state: ClaimState) -> dict:
+    iteration = state["iteration"] + 1
     response = MODEL.invoke(state["messages"])
-    return {"messages": [response], "iteration": state["iteration"] + 1}
+    ledger.log_audit(
+        state["claim_id"],
+        "agent_think",
+        {
+            "sub_agent": "single",
+            "model": active_model_name(),
+            "provider": active_provider(),
+            "iteration": iteration,
+            "proposed_tools": [tc["name"] for tc in getattr(response, "tool_calls", []) or []],
+        },
+        "agent",
+        event_subtype="single",
+    )
+    return {"messages": [response], "iteration": iteration}
 
 
 def _derive_check_updates(claim_type: str, tool_name: str, args: dict, result: dict, checks: dict) -> list[tuple[str, str, dict]]:
@@ -204,22 +229,48 @@ def act_observe_node(state: ClaimState) -> dict:
 
         if name == "ask_human" and questions_asked >= HUMAN_QUESTION_BUDGET:
             result = {"skipped": True, "reason": "human question budget exhausted"}
-            ledger.log_audit(claim_id, "tool_call", {"tool": name, "args": args, "result": result}, "agent")
+            ledger.log_audit(claim_id, "tool_call", {"tool": name, "args": args, "result": result}, "agent", event_subtype=name)
             tool_messages.append(ToolMessage(content=json.dumps(result), tool_call_id=tool_call_id))
             continue
+        if name not in TOOLS_BY_NAME:
+            # A weak model can hallucinate a tool name -- surface it, don't crash.
+            result = {"error": "unknown_tool", "detail": f"{name!r} is not an available tool"}
+            ledger.log_audit(claim_id, "tool_call", {"tool": name, "args": args, "result": result}, "agent", event_subtype=name)
+            tool_messages.append(ToolMessage(content=json.dumps(result), tool_call_id=tool_call_id))
+            continue
+
         if name == "ask_human":
             questions_asked += 1
+            result = TOOLS_BY_NAME[name].invoke(args)  # raises a GraphInterrupt here, pausing the run
+        else:
+            try:
+                result = TOOLS_BY_NAME[name].invoke(args)
+            except Exception as exc:
+                # Weak models sometimes emit a tool call with missing/invalid args --
+                # feed the error back to the model instead of crashing the run.
+                result = {"error": "tool_execution_failed", "detail": str(exc)[:500]}
 
-        result = TOOLS_BY_NAME[name].invoke(args)  # ask_human raises a GraphInterrupt here, pausing the run
+        updates = _derive_check_updates(claim_type, name, args, result, checks)
 
         # Audit trail gets the full result (e.g. search_policy's ~20 raw candidates +
         # scores, requirements.md §9); the model only sees the trimmed version so its
         # context doesn't balloon with candidates it already discarded.
-        ledger.log_audit(claim_id, "tool_call", {"tool": name, "args": args, "result": result}, "agent")
+        ledger.log_audit(
+            claim_id,
+            "tool_call",
+            {
+                "tool": name,
+                "args": args,
+                "result": result,
+                "checks_updated": [{"check": cn, "status": st} for cn, st, _ in updates],
+            },
+            "agent",
+            event_subtype=name,
+        )
         llm_facing_result = {k: v for k, v in result.items() if k != "candidates"} if name == "search_policy" else result
         tool_messages.append(ToolMessage(content=json.dumps(llm_facing_result), tool_call_id=tool_call_id))
 
-        for check_name, status, detail in _derive_check_updates(claim_type, name, args, result, checks):
+        for check_name, status, detail in updates:
             if checks[check_name]["status"] != status:
                 progressed = True
             checks[check_name] = {"status": status, "detail": detail}

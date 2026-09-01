@@ -75,16 +75,102 @@ function ContextPanel({ context, loading }) {
   );
 }
 
+const EVENT_LABELS = {
+  claim_submitted: 'claim submitted',
+  run_started: 'run started',
+  agent_think: 'think',
+  tool_call: 'tool',
+  human_answer: 'human answer',
+  determination_written: 'determination',
+  recovery_assessment: 'recovery',
+};
+
+const RETRIEVAL_TOOLS = new Set(['search_policy', 'search_network_policy']);
+
+// One-line summary of a vector-search (RAG) call for the collapsed row.
+function retrievalDetail(p) {
+  const r = p.result || {};
+  const hits = r.results || [];
+  const scanned = r.candidate_count ?? (r.candidates ? r.candidates.length : null);
+  const filter = r.filter?.claim_type ? `filter=${r.filter.claim_type}` : '';
+  const q = r.query ? `"${r.query}"` : '';
+  if (!hits.length) {
+    return [q, filter, `0 clauses cleared the relevance floor of ${scanned ?? '?'} scanned`]
+      .filter(Boolean)
+      .join('  ·  ');
+  }
+  const top = hits[0];
+  const topStr = top?.citation
+    ? `top ${top.citation}${top.score != null ? ` (${top.score.toFixed(2)})` : ''}`
+    : '';
+  return [q, filter, `${hits.length} hit${hits.length > 1 ? 's' : ''} / ${scanned ?? '?'} scanned`, topStr]
+    .filter(Boolean)
+    .join('  ·  ');
+}
+
+// Pull the two or three things worth seeing without expanding a row: what happened,
+// a one-line detail, which sub-agent was active, and which model produced it.
+function describeAudit(entry) {
+  const p = entry.payload || {};
+  const t = entry.event_type;
+  let label = EVENT_LABELS[t] || t.replaceAll('_', ' ');
+  const subAgent = p.sub_agent || null;
+  const model = p.model || null;
+  let detail = '';
+
+  const toolName = p.tool || entry.event_subtype || '';
+  const isRetrieval = t === 'tool_call' && RETRIEVAL_TOOLS.has(toolName);
+
+  if (t === 'agent_think') {
+    const tools = p.proposed_tools || [];
+    detail = tools.length ? `→ ${tools.join(', ')}` : '→ (no tool proposed)';
+    if (p.role_switch) detail = `role switch  ${detail}`;
+  } else if (isRetrieval) {
+    label = toolName === 'search_network_policy' ? 'RAG · network' : 'RAG · policy';
+    const upd = p.checks_updated || [];
+    const updStr = upd.length ? `  ⇒ ${upd.map((u) => `${u.check}: ${u.status}`).join(', ')}` : '';
+    detail = retrievalDetail(p) + updStr;
+  } else if (t === 'tool_call') {
+    detail = toolName;
+    const upd = p.checks_updated || [];
+    if (upd.length) detail += `  ⇒ ${upd.map((u) => `${u.check}: ${u.status}`).join(', ')}`;
+    else if (p.result?.skipped) detail += '  (skipped)';
+  } else if (t === 'run_started') {
+    detail = [p.agent_mode && `mode: ${p.agent_mode}`, p.provider].filter(Boolean).join('  ·  ');
+  } else if (t === 'claim_submitted') {
+    detail = p.claim_type || '';
+  } else if (t === 'human_answer') {
+    detail = `"${p.answer ?? ''}"`;
+  } else if (t === 'determination_written') {
+    detail = `${(p.decision || '').toUpperCase()}${p.forced ? '  (forced)' : ''}`;
+  } else if (t === 'recovery_assessment') {
+    detail = entry.event_subtype === 'eligible' ? 'eligible' : 'not eligible';
+  } else if (entry.event_subtype) {
+    detail = entry.event_subtype;
+  }
+  return { label, detail, subAgent, model, isRetrieval };
+}
+
 function AuditRow({ entry }) {
   const [expanded, setExpanded] = useState(false);
+  const { label, detail, subAgent, model, isRetrieval } = describeAudit(entry);
   return (
-    <li className={`audit-row audit-source-${entry.source}`}>
+    <li className={`audit-row audit-source-${entry.source}${isRetrieval ? ' audit-row-retrieval' : ''}`}>
       <button type="button" className="audit-summary" onClick={() => setExpanded((e) => !e)}>
-        <span className="audit-time">{new Date(entry.created_at).toLocaleString()}</span>
-        <span className="audit-event">
-          {entry.event_type}
-          {entry.event_subtype ? ` / ${entry.event_subtype}` : ''}
+        <span className="audit-time" title={new Date(entry.created_at).toLocaleString()}>
+          {new Date(entry.created_at).toLocaleTimeString()}
         </span>
+        <span className="audit-event">{label}</span>
+        <span className="audit-detail" title={detail}>{detail}</span>
+        {subAgent && <span className={`sub-agent-pill sub-agent-${subAgent}`}>{subAgent}</span>}
+        {model && (
+          <span
+            className="audit-model"
+            title={entry.payload?.provider ? `provider: ${entry.payload.provider}` : undefined}
+          >
+            {model}
+          </span>
+        )}
         <span className={`source-pill source-${entry.source}`}>{entry.source}</span>
       </button>
       {expanded && entry.payload && (

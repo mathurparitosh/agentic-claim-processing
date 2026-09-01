@@ -6,8 +6,45 @@ loading -- per technical.md's Synthetic Data row, generated evidence must not
 accidentally contradict the claim's intended expected outcome.
 
 Usage:
-    python -m backend.generate_synthetic_data          # generate + review + load all scenarios
-    python -m backend.generate_synthetic_data --dry-run  # generate + review only, no DB writes
+
+    # Generate + review + load ALL 10 scenarios into the database
+    python -m backend.generate_synthetic_data
+
+    # Generate + review only, no database writes (useful for inspection)
+    python -m backend.generate_synthetic_data --dry-run
+
+    # Regenerate only specific accounts (useful after fixing a scenario or eval issue)
+    python -m backend.generate_synthetic_data --accounts ACC-9001,ACC-9002
+
+    # Dry-run for specific accounts
+    python -m backend.generate_synthetic_data --dry-run --accounts ACC-9006,ACC-9007
+
+You run this script:
+  1. DURING LOCAL DEV — to load fixture data into the local Postgres instance before
+     testing claims via the API or UI.
+  2. AFTER CHANGING A SCENARIO NARRATIVE — to regenerate evidence with the updated
+     requirements (e.g., "standing must be 'suspended'" instead of "'good'"). The script's
+     automated review (`review_scenario`) ensures the generated data still matches the
+     intent; if it doesn't, the script retries (up to 3 attempts per scenario) before
+     failing, so you can catch authoring mistakes immediately.
+  3. BEFORE RUNNING THE EVAL SUITE — to ensure all 10 accounts (ACC-9001 through ACC-9010)
+     are loaded and ready for `backend/eval_notebook.ipynb` to consume.
+
+Typical workflow:
+  $ ./scripts/start.sh              # Starts Postgres + backend + frontend
+  $ python -m backend.generate_synthetic_data  # Load fixtures into dev DB
+  $ python -m backend.smoke_test_orchestrator  # Quick validation on 3 accounts
+  $ jupyter notebook backend/eval_notebook.ipynb  # Full 10-claim eval
+
+Output on success:
+  Generates JSON for each scenario (pretty-printed for inspection), reviews it against
+  the scenario's `expect` block, and either loads it into the database or reports
+  failures. Failed scenarios (mismatched `expect` checks after 3 retries) cause the
+  script to exit with code 1, so CI can catch them.
+
+Exit codes:
+  0 — all scenarios generated, reviewed OK, and loaded (or just reviewed if --dry-run)
+  1 — at least one scenario failed review (see the error message for which checks failed)
 """
 import argparse
 import json

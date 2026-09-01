@@ -11,3 +11,6 @@ venv/
 .ipynb_checkpoints/
 softwares/
 .run/
+
+# logs
+*.log

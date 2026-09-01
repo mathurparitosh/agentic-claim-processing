@@ -44,7 +44,7 @@ from .graph import (
     _format_checks,
     finalize_node,
 )
-from .llm import build_agent_model
+from .llm import active_model_name, active_provider, build_agent_model
 from .tools import (
     HUMAN_QUESTION_BUDGET,
     ask_human,
@@ -158,7 +158,13 @@ def init_node(state: OrchestratorState) -> dict:
     ledger.log_audit(
         claim_id,
         "run_started",
-        {"claim_type": claim_type, "claim_payload": payload, "agent_mode": "orchestrator"},
+        {
+            "claim_type": claim_type,
+            "claim_payload": payload,
+            "agent_mode": "orchestrator",
+            "model": active_model_name(),
+            "provider": active_provider(),
+        },
         "agent",
     )
 
@@ -175,15 +181,38 @@ def init_node(state: OrchestratorState) -> dict:
     }
 
 
+def _log_think(claim_id: str, sub_agent: str, iteration: int, response, role_switch: bool = False) -> None:
+    """One audit row per LLM reasoning turn -- records which sub-agent is active, the
+    model/provider that produced it, and the tool(s) it proposed for this turn."""
+    ledger.log_audit(
+        claim_id,
+        "agent_think",
+        {
+            "sub_agent": sub_agent,
+            "model": active_model_name(),
+            "provider": active_provider(),
+            "iteration": iteration,
+            "role_switch": role_switch,
+            "proposed_tools": [tc["name"] for tc in getattr(response, "tool_calls", []) or []],
+        },
+        "agent",
+        event_subtype=sub_agent,
+    )
+
+
 def think_research_node(state: OrchestratorState) -> dict:
+    iteration = state["iteration"] + 1
     response = MODEL_RESEARCH.invoke(state["messages"])
-    return {"messages": [response], "iteration": state["iteration"] + 1, "active_agent": "research"}
+    _log_think(state["claim_id"], "research", iteration, response)
+    return {"messages": [response], "iteration": iteration, "active_agent": "research"}
 
 
 def think_decisioning_node(state: OrchestratorState) -> dict:
+    iteration = state["iteration"] + 1
     new_messages = []
     invoke_messages = state["messages"]
-    if state.get("active_agent") != "decisioning":
+    role_switch = state.get("active_agent") != "decisioning"
+    if role_switch:
         # First entry into Decisioning this run -- inject an explicit role-switch
         # reminder so the model knows its persona/toolset changed; each act_observe
         # round afterward keeps it anchored with the updated check ledger, same as the
@@ -195,7 +224,8 @@ def think_decisioning_node(state: OrchestratorState) -> dict:
         new_messages.append(reminder)
     response = MODEL_DECISIONING.invoke(invoke_messages)
     new_messages.append(response)
-    return {"messages": new_messages, "iteration": state["iteration"] + 1, "active_agent": "decisioning"}
+    _log_think(state["claim_id"], "decisioning", iteration, response, role_switch=role_switch)
+    return {"messages": new_messages, "iteration": iteration, "active_agent": "decisioning"}
 
 
 def act_observe_node(state: OrchestratorState) -> dict:
@@ -225,21 +255,64 @@ def act_observe_node(state: OrchestratorState) -> dict:
 
         if name == "ask_human" and questions_asked >= HUMAN_QUESTION_BUDGET:
             result = {"skipped": True, "reason": "human question budget exhausted"}
-            ledger.log_audit(claim_id, "tool_call", {"tool": name, "args": args, "result": result, "sub_agent": active_agent}, "agent")
+            ledger.log_audit(
+                claim_id,
+                "tool_call",
+                {"tool": name, "args": args, "result": result, "sub_agent": active_agent},
+                "agent",
+                event_subtype=name,
+            )
             tool_messages.append(ToolMessage(content=json.dumps(result), tool_call_id=tool_call_id))
             continue
+        if name not in ALL_TOOLS_BY_NAME:
+            # A weak model (seen with local Ollama models) can hallucinate a tool name.
+            result = {"error": "unknown_tool", "detail": f"{name!r} is not an available tool"}
+            ledger.log_audit(
+                claim_id,
+                "tool_call",
+                {"tool": name, "args": args, "result": result, "sub_agent": active_agent},
+                "agent",
+                event_subtype=name,
+            )
+            tool_messages.append(ToolMessage(content=json.dumps(result), tool_call_id=tool_call_id))
+            continue
+
         if name == "ask_human":
             questions_asked += 1
+            result = ALL_TOOLS_BY_NAME[name].invoke(args)  # raises a GraphInterrupt here, pausing the run
+        else:
+            try:
+                result = ALL_TOOLS_BY_NAME[name].invoke(args)
+            except Exception as exc:
+                # Weak models sometimes emit a tool call with missing/invalid args
+                # (e.g. search_policy with no query). Feed the error back to the model
+                # as a normal tool result instead of crashing the whole run.
+                result = {"error": "tool_execution_failed", "detail": str(exc)[:500]}
 
-        result = ALL_TOOLS_BY_NAME[name].invoke(args)  # ask_human raises a GraphInterrupt here, pausing the run
+        # Derive the check-ledger updates first so the audit row can name which checks
+        # this tool call moved and to what -- the single most useful thing to see in the
+        # collapsed audit view.
+        updates = _derive_check_updates(claim_type, name, args, result, checks)
 
         # Same audit-trail-gets-full-result / model-gets-trimmed-result split as
         # graph.py's act_observe_node, plus the sub_agent tag.
-        ledger.log_audit(claim_id, "tool_call", {"tool": name, "args": args, "result": result, "sub_agent": active_agent}, "agent")
+        ledger.log_audit(
+            claim_id,
+            "tool_call",
+            {
+                "tool": name,
+                "args": args,
+                "result": result,
+                "sub_agent": active_agent,
+                "checks_updated": [{"check": cn, "status": st} for cn, st, _ in updates],
+            },
+            "agent",
+            event_subtype=name,
+        )
         llm_facing_result = {k: v for k, v in result.items() if k != "candidates"} if name == "search_policy" else result
         tool_messages.append(ToolMessage(content=json.dumps(llm_facing_result), tool_call_id=tool_call_id))
 
-        for check_name, status, detail in _derive_check_updates(claim_type, name, args, result, checks):
+        for check_name, status, detail in updates:
             if checks[check_name]["status"] != status:
                 progressed = True
             checks[check_name] = {"status": status, "detail": detail}

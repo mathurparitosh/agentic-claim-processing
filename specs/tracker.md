@@ -572,3 +572,28 @@ Built 2026-08-17.
 - [ ] 💻 Record/prepare a demo walkthrough referencing requirements.md and technical.md
 - [ ] 💻 Confirm technical.md and the `.drawio` diagram still match what was actually built; update if implementation diverged
 - [ ] 💻 Write up known limitations / follow-ups (e.g., multi-user auth, CI-based test harness, dedicated reranker)
+
+---
+
+## Unassigned — Backlog
+
+Not scheduled into any phase above; revisit if/when the trigger condition below
+actually shows up.
+
+- [ ] 💻 **Split the background worker out of the API container** (raised 2026-08-17,
+  discussing "API & Agent Backend is one container" in `docs/c4-architecture.md`
+  Level 2, in the context of adding more APIs to this backend going forward). Current
+  design: `backend/worker.py` runs the claim-processing agent in-process via FastAPI
+  `BackgroundTasks` — no separate worker process or task queue
+  (`technical.md`'s Background Execution row already rejected Celery/RQ as
+  unjustified at this scale).
+  **Don't split preemptively just because more endpoints get added** — the risk
+  `BackgroundTasks` actually creates is long-running/blocking work sharing the same
+  process and event loop as request handling; new endpoints that are fast/CRUD-style
+  won't contend with the claim-processing worker for resources. Revisit only once one
+  of these actually shows up: (1) claim volume high enough that in-process agent runs
+  start starving request latency, (2) needing to scale worker replicas independently
+  from API replicas, or (3) wanting a worker crash/restart to not affect API uptime.
+  At that point, pull `worker.py`'s `run_claim_agent`/`resume_claim_agent` behind a
+  real queue (Celery/RQ, or similar) as a second process/container — until then, this
+  stays a documented tradeoff, not a task.

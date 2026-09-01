@@ -68,7 +68,13 @@ def finalize_decision(claim_id: str, checks: dict, forced_reason: str | None = N
     log_audit(
         claim_id,
         "determination_written",
-        {"decision": decision, "reason": reason, "checks": checks},
+        {
+            "decision": decision,
+            "reason": reason,
+            "checks": checks,
+            "forced": forced_reason is not None,
+        },
         "agent",
+        event_subtype=decision,
     )
     return decision, reason
