@@ -10,6 +10,7 @@ psycopg_pool
 python-dotenv
 langsmith
 unstructured
+grandalf  # ASCII rendering of the compiled graph for GET /agent/graph (mermaid is primary)
 
 # Dev/eval only (Phase 9, backend/eval_notebook.ipynb) -- not needed to run the app.
 jupyter

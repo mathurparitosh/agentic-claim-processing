@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 from . import db
 from . import worker
-from .agent import ledger, recovery
+from .agent import ledger, recovery, tracing
 
 app = FastAPI()
 
@@ -218,6 +218,43 @@ def get_audit(claim_id: str):
             entries = cur.fetchall()
 
     return {"entries": entries}
+
+
+@claims_router.get("/agent/tools")
+def agent_tools():
+    """Static tool catalog for the frontend's Agent tab (tracker.md Phase 12): every
+    tool, its category, params, owning sub-agent, and the check(s) its result resolves.
+    Not claim-specific -- the same for every run."""
+    return tracing.tool_catalog()
+
+
+@claims_router.get("/agent/graph")
+def agent_graph():
+    """The compiled orchestrator graph as Mermaid + ASCII, with per-node prose, for the
+    Agent tab's Graph view. Rendered from the compiled StateGraph so it can't drift."""
+    return tracing.graph_view()
+
+
+@claims_router.get("/claims/{claim_id}/agent-context")
+def agent_context(claim_id: str):
+    """The message window the model is working from right now, reconstructed from the
+    LangGraph checkpoint (thread_id == claim_id), plus the run's counters and next node
+    -- backs the claim detail view's Context tab. Read-only: does not touch the ledger
+    or audit trail."""
+    result = tracing.get_agent_context(claim_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="claim not found")
+    return result
+
+
+@claims_router.get("/claims/{claim_id}/memory")
+def agent_memory(claim_id: str):
+    """Episodic facts for this claim's account -- the cross-claim memory the run reads
+    at init and writes back after account lookups. Backs the Memory tab."""
+    result = tracing.get_agent_memory(claim_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="claim not found")
+    return result
 
 
 @claims_router.get("/claims/{claim_id}/questions")

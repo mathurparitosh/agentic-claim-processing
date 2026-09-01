@@ -323,3 +323,37 @@ TOOLS = [
     ask_human,
     write_determination,
 ]
+
+# Declarative companions to the imperative logic elsewhere, for the frontend's Agent
+# tab (tracker.md Phase 12). Keep these in sync by hand:
+#   - TOOL_CATEGORY mirrors the Grounding/Computation/Retrieval grouping in this file
+#     and specs/technical.md §4.
+#   - TOOL_RESOLVES_CHECKS mirrors backend/agent/graph.py:_derive_check_updates -- the
+#     check(s) a given tool's result can move. search_policy resolves whichever
+#     retrieval-only check applies to the claim type (dispute-window for
+#     billing_dispute, liability-rule for fraud). ask_human can close *any* check (it
+#     takes check_name as an argument), so it's listed as "*". write_determination and
+#     search_network_policy resolve nothing directly.
+TOOL_CATEGORY = {
+    "lookup_transaction": "Grounding",
+    "lookup_account_profile": "Grounding",
+    "lookup_access_logs": "Grounding",
+    "check_duplicate_charge": "Computation",
+    "check_transaction_anomaly": "Computation",
+    "search_policy": "Retrieval",
+    "search_network_policy": "Retrieval",
+    "ask_human": "Human-in-the-loop",
+    "write_determination": "Terminal",
+}
+
+TOOL_RESOLVES_CHECKS = {
+    "lookup_transaction": ["transaction_exists"],
+    "lookup_account_profile": ["account_standing", "account_red_flags"],
+    "lookup_access_logs": ["system_access_log_check"],
+    "check_duplicate_charge": ["duplicate_charge_check"],
+    "check_transaction_anomaly": ["transaction_pattern_anomaly"],
+    "search_policy": ["policy_dispute_window", "policy_liability_rule"],
+    "ask_human": ["*"],
+    "write_determination": [],
+    "search_network_policy": [],
+}
