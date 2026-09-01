@@ -1,34 +1,33 @@
-"""The ReAct (Think -> Act -> Observe) agent graph (requirements.md §5).
+"""Shared claim-graph core: state shape, check-ledger derivation rules, the finalize
+node, and the iteration caps.
 
-Think is an LLM call proposing tool call(s). Act (execute the tool) and Observe (fold
-the result into the check ledger) are combined into one graph node -- Observe here is
-deterministic bookkeeping derived from a tool result, not a second reasoning step, so it
-doesn't need its own LLM call. Termination is computed from check-ledger state, never
-self-declared by the model (requirements.md §6).
+This module used to also hold a standalone single-agent ReAct graph (`build_graph`, an
+`init`/`think`/`act_observe`/`finalize` loop) that ran when `AGENT_MODE=legacy`. That
+mode was removed -- `backend/agent/orchestrator.py`'s Research/Decisioning supervisor
+graph is now the only claim-processing path. What remains here is the part
+`orchestrator.py` imports and builds on:
+
+  - `ClaimState`            -- the base TypedDict `OrchestratorState` extends
+  - `_derive_check_updates` -- the tool-result -> check-ledger business rules
+  - `_format_checks`        -- ledger rendering for system prompts / reminders
+  - `finalize_node`         -- the deterministic Approve/Deny/Inconclusive close
+  - `MAX_ITERATIONS` / `NO_PROGRESS_LIMIT` -- global termination caps
+  - `initial_state`         -- the graph's entry payload
+
+Keeping these here (rather than in `orchestrator.py`) preserves the guarantee that the
+check-ledger and decision rules live in one place and cannot drift. Termination is
+computed from check-ledger state, never self-declared by the model (requirements.md §6).
 """
 import json
-from typing import Annotated, Literal, TypedDict
+from typing import Annotated, TypedDict
 
-from langchain_core.messages import SystemMessage, ToolMessage
-from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 
-from . import episodic, ledger
+from . import ledger
 from .checks import REQUIRED_CHECKS
-from .llm import active_model_name, active_provider, build_agent_model
-from .tools import HUMAN_QUESTION_BUDGET, TOOLS
 
 MAX_ITERATIONS = 12
 NO_PROGRESS_LIMIT = 5
-
-TOOLS_BY_NAME = {t.name: t for t in TOOLS}
-# Provider/model switchable via .env.local's LLM_PROVIDER -- see agent/llm.py. Also
-# sidesteps a real LangGraph interrupt hazard: if a turn's tool_calls included e.g.
-# lookup_transaction *and* ask_human, resuming after the ask_human pause re-runs the
-# whole node from the top, re-executing lookup_transaction's DB writes and producing a
-# duplicate audit_trail row. With exactly one tool call per turn, ask_human (when
-# chosen) has no side effects ahead of it in the same node call, so resume is safe.
-MODEL = build_agent_model(TOOLS)
 
 
 class ClaimState(TypedDict):
@@ -45,101 +44,12 @@ class ClaimState(TypedDict):
     decision_reason: str | None
 
 
-SYSTEM_PROMPT_HEADER = (
-    "You are the Claim Assistant research agent. You gather evidence about a submitted "
-    "claim using tools; every tool call you make is recorded and used to resolve the "
-    "claim's required checks. You never decide Approve/Deny/Inconclusive yourself -- "
-    "that outcome is computed deterministically from the check ledger once you call "
-    "write_determination. Call exactly one round of tool(s) per turn, targeting an "
-    "UNKNOWN or BLOCKED check. Look up the disputed transaction first (lookup_transaction) "
-    "so you have its real occurred_at timestamp -- other tools that take a transaction "
-    "timestamp expect that value, not the claim's filed_at/submission date. Once every "
-    "check is resolved -- or you cannot resolve the remaining ones with the tools/human "
-    "input available -- call write_determination."
-)
-
-
 def _format_checks(checks: dict) -> str:
     lines = []
     for name, c in checks.items():
         suffix = f" ({json.dumps(c['detail'])})" if c["detail"] else ""
         lines.append(f"  - {name}: {c['status']}{suffix}")
     return "\n".join(lines)
-
-
-def _build_system_prompt(claim_type: str, claim_payload: dict, checks: dict, known_facts: dict) -> str:
-    parts = [
-        SYSTEM_PROMPT_HEADER,
-        "",
-        f"Claim type: {claim_type}",
-        f"Claim payload: {json.dumps(claim_payload)}",
-        "",
-        "Required checks for this claim type and their current status:",
-        _format_checks(checks),
-    ]
-    if known_facts:
-        parts += ["", f"Known facts from prior claims about this account: {json.dumps(known_facts)}"]
-    return "\n".join(parts)
-
-
-def init_node(state: ClaimState) -> dict:
-    claim_id, claim_type, payload = state["claim_id"], state["claim_type"], state["claim_payload"]
-    checks = ledger.init_checks(claim_id, claim_type)
-
-    # Deterministic pre-resolution: duplicate_charge_check only applies when the claim's
-    # own stated reason is 'duplicate_charge' -- that's submitted data, not agent
-    # inference, so resolving it here (rather than spending a tool call) preserves
-    # determinism (requirements.md §6).
-    if claim_type == "billing_dispute" and payload.get("reason") != "duplicate_charge":
-        detail = {"note": "not applicable: claim reason is not duplicate_charge"}
-        checks["duplicate_charge_check"] = {"status": "PASS", "detail": detail}
-        ledger.update_check(claim_id, "duplicate_charge_check", "PASS", detail)
-
-    account_id = payload.get("account_id")
-    known_facts = episodic.get_facts(account_id, "account") if account_id else {}
-
-    ledger.log_audit(
-        claim_id,
-        "run_started",
-        {
-            "claim_type": claim_type,
-            "claim_payload": payload,
-            "agent_mode": "legacy",
-            "model": active_model_name(),
-            "provider": active_provider(),
-        },
-        "agent",
-    )
-
-    return {
-        "checks": checks,
-        "messages": [SystemMessage(content=_build_system_prompt(claim_type, payload, checks, known_facts))],
-        "iteration": 0,
-        "iterations_without_progress": 0,
-        "questions_asked": 0,
-        "decision_requested": False,
-        "decision": None,
-        "decision_reason": None,
-    }
-
-
-def think_node(state: ClaimState) -> dict:
-    iteration = state["iteration"] + 1
-    response = MODEL.invoke(state["messages"])
-    ledger.log_audit(
-        state["claim_id"],
-        "agent_think",
-        {
-            "sub_agent": "single",
-            "model": active_model_name(),
-            "provider": active_provider(),
-            "iteration": iteration,
-            "proposed_tools": [tc["name"] for tc in getattr(response, "tool_calls", []) or []],
-        },
-        "agent",
-        event_subtype="single",
-    )
-    return {"messages": [response], "iteration": iteration}
 
 
 def _derive_check_updates(claim_type: str, tool_name: str, args: dict, result: dict, checks: dict) -> list[tuple[str, str, dict]]:
@@ -209,88 +119,6 @@ def _derive_check_updates(claim_type: str, tool_name: str, args: dict, result: d
     return updates
 
 
-def act_observe_node(state: ClaimState) -> dict:
-    claim_id, claim_type = state["claim_id"], state["claim_type"]
-    last_ai_message = state["messages"][-1]
-    checks = {name: dict(c) for name, c in state["checks"].items()}
-    questions_asked = state["questions_asked"]
-    decision_requested = state["decision_requested"]
-    progressed = False
-    tool_messages = []
-
-    for call in last_ai_message.tool_calls:
-        name, args, tool_call_id = call["name"], call["args"], call["id"]
-
-        if name == "write_determination":
-            decision_requested = True
-            ledger.log_audit(claim_id, "tool_call", {"tool": name, "args": args}, "agent", event_subtype="write_determination")
-            tool_messages.append(ToolMessage(content="Determination requested; ledger will be finalized.", tool_call_id=tool_call_id))
-            continue
-
-        if name == "ask_human" and questions_asked >= HUMAN_QUESTION_BUDGET:
-            result = {"skipped": True, "reason": "human question budget exhausted"}
-            ledger.log_audit(claim_id, "tool_call", {"tool": name, "args": args, "result": result}, "agent", event_subtype=name)
-            tool_messages.append(ToolMessage(content=json.dumps(result), tool_call_id=tool_call_id))
-            continue
-        if name not in TOOLS_BY_NAME:
-            # A weak model can hallucinate a tool name -- surface it, don't crash.
-            result = {"error": "unknown_tool", "detail": f"{name!r} is not an available tool"}
-            ledger.log_audit(claim_id, "tool_call", {"tool": name, "args": args, "result": result}, "agent", event_subtype=name)
-            tool_messages.append(ToolMessage(content=json.dumps(result), tool_call_id=tool_call_id))
-            continue
-
-        if name == "ask_human":
-            questions_asked += 1
-            result = TOOLS_BY_NAME[name].invoke(args)  # raises a GraphInterrupt here, pausing the run
-        else:
-            try:
-                result = TOOLS_BY_NAME[name].invoke(args)
-            except Exception as exc:
-                # Weak models sometimes emit a tool call with missing/invalid args --
-                # feed the error back to the model instead of crashing the run.
-                result = {"error": "tool_execution_failed", "detail": str(exc)[:500]}
-
-        updates = _derive_check_updates(claim_type, name, args, result, checks)
-
-        # Audit trail gets the full result (e.g. search_policy's ~20 raw candidates +
-        # scores, requirements.md §9); the model only sees the trimmed version so its
-        # context doesn't balloon with candidates it already discarded.
-        ledger.log_audit(
-            claim_id,
-            "tool_call",
-            {
-                "tool": name,
-                "args": args,
-                "result": result,
-                "checks_updated": [{"check": cn, "status": st} for cn, st, _ in updates],
-            },
-            "agent",
-            event_subtype=name,
-        )
-        llm_facing_result = {k: v for k, v in result.items() if k != "candidates"} if name == "search_policy" else result
-        tool_messages.append(ToolMessage(content=json.dumps(llm_facing_result), tool_call_id=tool_call_id))
-
-        for check_name, status, detail in updates:
-            if checks[check_name]["status"] != status:
-                progressed = True
-            checks[check_name] = {"status": status, "detail": detail}
-            ledger.update_check(claim_id, check_name, status, detail)
-
-            account_id = args.get("account_id")
-            if account_id and check_name in ("account_standing", "account_red_flags"):
-                episodic.upsert_fact(account_id, "account", check_name, {"status": status, "detail": detail}, claim_id, source=name)
-
-    reminder = SystemMessage(content="Updated check ledger:\n" + _format_checks(checks))
-
-    return {
-        "messages": tool_messages + [reminder],
-        "checks": checks,
-        "questions_asked": questions_asked,
-        "decision_requested": decision_requested,
-        "iterations_without_progress": 0 if progressed else state["iterations_without_progress"] + 1,
-    }
-
-
 def finalize_node(state: ClaimState) -> dict:
     forced_reason = None
     if not state["decision_requested"]:
@@ -301,36 +129,6 @@ def finalize_node(state: ClaimState) -> dict:
 
     decision, reason = ledger.finalize_decision(state["claim_id"], state["checks"], forced_reason=forced_reason)
     return {"decision": decision, "decision_reason": reason}
-
-
-def route_after_act(state: ClaimState) -> Literal["think", "finalize"]:
-    if state["decision_requested"]:
-        return "finalize"
-    if any(c["status"] == "FAIL" for c in state["checks"].values()):
-        return "finalize"
-    if all(c["status"] == "PASS" for c in state["checks"].values()):
-        return "finalize"
-    if state["iteration"] >= MAX_ITERATIONS:
-        return "finalize"
-    if state["iterations_without_progress"] >= NO_PROGRESS_LIMIT:
-        return "finalize"
-    return "think"
-
-
-def build_graph(checkpointer):
-    workflow = StateGraph(ClaimState)
-    workflow.add_node("init", init_node)
-    workflow.add_node("think", think_node)
-    workflow.add_node("act_observe", act_observe_node)
-    workflow.add_node("finalize", finalize_node)
-
-    workflow.add_edge(START, "init")
-    workflow.add_edge("init", "think")
-    workflow.add_edge("think", "act_observe")
-    workflow.add_conditional_edges("act_observe", route_after_act, {"think": "think", "finalize": "finalize"})
-    workflow.add_edge("finalize", END)
-
-    return workflow.compile(checkpointer=checkpointer)
 
 
 def initial_state(claim_id: str, claim_type: str, claim_payload: dict) -> dict:

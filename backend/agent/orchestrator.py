@@ -3,18 +3,17 @@ conditional edge routing between them inside a single LangGraph graph
 (specs/technical.md §5, resolved 2026-08-17: one graph with two think-nodes, not two
 separate subgraphs).
 
-Replaces graph.py's single Think/Act/Observe loop as the default claim-processing path
-(AGENT_MODE=orchestrator, backend/worker.py). graph.py's single-agent loop stays in the
-codebase as a fallback (AGENT_MODE=legacy), unmodified -- this module imports its
-shared, unmodified business-rule helpers (_derive_check_updates, _format_checks,
-ClaimState, finalize_node, the iteration caps) rather than duplicating them, so the
-check-ledger/decision rules can never drift between the two paths.
+This is the only claim-processing path (backend/worker.py). It imports the shared
+business-rule helpers (_derive_check_updates, _format_checks, ClaimState,
+finalize_node, the iteration caps) from graph.py -- which is now just that shared core;
+the standalone single-agent Think/Act/Observe loop that used to live there and run
+under AGENT_MODE=legacy has been removed -- so the check-ledger/decision rules stay
+defined in exactly one place.
 
-Same determinism/boundedness guarantees as the legacy graph (requirements.md §13): the
-final Approve/Deny/Inconclusive outcome is still computed by
-compute_decision(check_ledger) in finalize_node, never asserted by either sub-agent;
-iteration/no-progress/human-question counters are global across both sub-agents, not
-reset per sub-agent.
+Determinism/boundedness per requirements.md §13: the final Approve/Deny/Inconclusive
+outcome is computed by compute_decision(check_ledger) in finalize_node, never asserted
+by either sub-agent; iteration/no-progress/human-question counters are global across
+both sub-agents, not reset per sub-agent.
 
 Routing is a simple two-phase pattern, not a dynamic per-turn handoff: Research always
 runs first, and the supervisor moves to Decisioning -- permanently, it never routes

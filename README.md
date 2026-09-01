@@ -47,12 +47,14 @@ Three runnable units, three external services:
    - iteration cap (~12), 5 no-progress iterations, or the 3-question `ask_human`
      budget exhausted → **Inconclusive** with a reason
 
-`AGENT_MODE=orchestrator` (default) runs the **Research / Decisioning supervisor
-graph**: a Research sub-agent (Grounding + Retrieval tools only) gathers evidence, then
-hands off permanently to a Decisioning sub-agent (Computation tools + `ask_human`) that
-drives the remaining checks. Iteration/no-progress/human-budget counters are global
-across the whole run. `AGENT_MODE=legacy` runs the original single-agent ReAct loop
-([`backend/agent/graph.py`](backend/agent/graph.py)), kept as a fallback.
+Claim processing runs on the **Research / Decisioning supervisor graph**
+([`backend/agent/orchestrator.py`](backend/agent/orchestrator.py)): a Research
+sub-agent (Grounding + Retrieval tools only) gathers evidence, then hands off
+permanently to a Decisioning sub-agent (Computation tools + `ask_human`) that drives
+the remaining checks. Iteration/no-progress/human-budget counters are global across the
+whole run. ([`backend/agent/graph.py`](backend/agent/graph.py) holds the shared state /
+check-ledger / finalize core it builds on — it used to also carry a standalone
+single-agent `AGENT_MODE=legacy` loop, since removed.)
 
 A separate **on-demand Recovery agent** (`POST /claims/{id}/recovery`) runs *after* a
 decision exists, only for `approve` / `inconclusive` claims: one `search_network_policy`
@@ -77,13 +79,13 @@ Full mapping (check → resolving tool → PASS/FAIL semantics) in
 ```
 backend/
   main.py                     FastAPI app + routes + shared-password auth
-  worker.py                   run_claim_agent / resume_claim_agent (BackgroundTasks); picks orchestrator vs legacy
+  worker.py                   run_claim_agent / resume_claim_agent (BackgroundTasks); build_claim_graph()
   db.py                       pooled psycopg connection helper; loads .env.local
   agent/
-    orchestrator.py           default path — Research/Decisioning supervisor graph
-    graph.py                  legacy single-agent ReAct graph + shared helpers (checks, finalize, caps)
+    orchestrator.py           the claim-processing path — Research/Decisioning supervisor graph
+    graph.py                  shared core: ClaimState, check-ledger derivation, finalize_node, caps
     recovery.py               on-demand card-network recovery agent
-    llm.py                    OpenAI / OpenRouter provider switch
+    llm.py                    OpenAI / OpenRouter / Ollama provider switch
     tools.py                  Grounding / Computation / Retrieval / ask_human / write_determination
     checks.py                 REQUIRED_CHECKS per claim type; deterministic compute_decision
     ledger.py                 sole writer of check_ledger / audit_trail / claims.decision
@@ -244,8 +246,7 @@ Defined in `.env.example`; copy to `.env.local` (gitignored — never commit) an
 
 | Variable | Notes |
 |---|---|
-| `AGENT_MODE` | `orchestrator` (default) or `legacy` — see [`backend/worker.py`](backend/worker.py) |
-| `LLM_PROVIDER` | `openai` (default) or `openrouter` — see [`backend/agent/llm.py`](backend/agent/llm.py) |
+| `LLM_PROVIDER` | `openai` (default), `openrouter`, or `ollama` — see [`backend/agent/llm.py`](backend/agent/llm.py) |
 | `OPENAI_API_KEY` / `OPENAI_MODEL` | Required for the default provider; also used for embeddings regardless of `LLM_PROVIDER` |
 | `OPENROUTER_API_KEY` / `OPENROUTER_MODEL` / `OPENROUTER_BASE_URL` | Only when `LLM_PROVIDER=openrouter` |
 | `QDRANT_URL` / `QDRANT_API_KEY` / `QDRANT_COLLECTION` | Qdrant Cloud; collection defaults to `claims-policy-corpus` |

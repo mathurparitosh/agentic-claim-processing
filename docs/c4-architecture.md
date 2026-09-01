@@ -8,14 +8,16 @@ sync with the code rather than the plan. Diagrams render as
 [Mermaid](https://mermaid.js.org/) — GitHub, most IDEs (incl. VS Code with a Mermaid
 extension), and any Mermaid-aware Markdown viewer render them inline.
 
-Reflects the system as of 2026-08-17 (Qdrant as the vector store, OpenAI/OpenRouter as
-switchable LLM providers — see `specs/tracker.md` Phase 3 and the LLM-provider note in
-Phase 5 for how it got here — plus Phase 7's refactor: `backend/agent/orchestrator.py`'s
-Research/Decisioning supervisor graph is now the default claim-processing path
-(`AGENT_MODE=orchestrator`), the on-demand Recovery agent
-(`backend/agent/recovery.py`, `POST /claims/{id}/recovery`) was added, and LangSmith
-tracing (Level 1/2) is now actually configured and live, not just a planned
-dependency).
+Reflects the system as of 2026-08-31 (Qdrant as the vector store, OpenAI/OpenRouter/
+Ollama as switchable LLM providers — see `specs/tracker.md` Phase 3 and the
+LLM-provider note in Phase 5 for how it got here — plus Phase 7's refactor:
+`backend/agent/orchestrator.py`'s Research/Decisioning supervisor graph is the
+claim-processing path, with `backend/agent/graph.py` reduced to the shared core it
+builds on (the standalone `AGENT_MODE=legacy` single-agent loop was removed in
+Phase 12); the on-demand Recovery agent (`backend/agent/recovery.py`,
+`POST /claims/{id}/recovery`) was added; LangSmith tracing (Level 1/2) is configured
+and live; and the frontend gained agent-tracing tabs — Context / Memory / Sub-agents
+per claim, plus a portal-level Agent tab for the Tools catalog and compiled Graph).
 
 ---
 
@@ -127,12 +129,12 @@ C4Component
 
   Container_Boundary(api, "API & Agent Backend") {
     Component(routes, "API Routes", "backend/main.py", "HTTP endpoints; require_auth gate on every /claims* and /accounts* route")
-    Component(worker, "Worker", "backend/worker.py", "run_claim_agent / resume_claim_agent — _build_graph() picks build_orchestrator_graph (default) or graph.py's build_graph (AGENT_MODE=legacy), drives it via BackgroundTasks, handles __interrupt__")
-    Component(orchestratorC, "Orchestrator Graph", "backend/agent/orchestrator.py", "Default claim-processing path (AGENT_MODE=orchestrator): one supervisor StateGraph, think_research/think_decisioning sub-nodes (own narrower toolsets) sharing one act_observe node + checkpointer")
-    Component(graphC, "Agent Graph (legacy)", "backend/agent/graph.py", "Fallback path (AGENT_MODE=legacy), unmodified: single-agent ReAct StateGraph init -> think -> act_observe -> (loop | finalize). Also the source of the shared business-rule helpers orchestrator.py imports (see note below)")
-    Component(recoveryC, "Recovery Agent", "backend/agent/recovery.py", "assess_recovery(claim_id) — on-demand, not part of either graph above: one search_network_policy retrieval call + one with_structured_output LLM call, not a multi-turn ReAct loop")
-    Component(llmC, "LLM Provider Switch", "backend/agent/llm.py", "_build_base_model() shared by build_agent_model(tools) (tool-calling, used by graphC/orchestratorC) and build_structured_model(schema) (with_structured_output, used by recoveryC), both per LLM_PROVIDER")
-    Component(toolsC, "Tools", "backend/agent/tools.py", "Grounding, Computation, Retrieval (search_policy), ask_human, write_determination — plus search_network_policy, reachable only from recoveryC, never from orchestratorC/graphC")
+    Component(worker, "Worker", "backend/worker.py", "run_claim_agent / resume_claim_agent — build_claim_graph() compiles the orchestrator graph, drives it via BackgroundTasks, handles __interrupt__")
+    Component(orchestratorC, "Orchestrator Graph", "backend/agent/orchestrator.py", "The claim-processing path: one supervisor StateGraph, think_research/think_decisioning sub-nodes (own narrower toolsets) sharing one act_observe node + checkpointer")
+    Component(graphC, "Agent Graph Core", "backend/agent/graph.py", "Shared, graph-agnostic core: ClaimState, _derive_check_updates, _format_checks, finalize_node, MAX_ITERATIONS/NO_PROGRESS_LIMIT, initial_state. orchestrator.py imports all of it. (Once also held a standalone AGENT_MODE=legacy single-agent loop, since removed.)")
+    Component(recoveryC, "Recovery Agent", "backend/agent/recovery.py", "assess_recovery(claim_id) — on-demand, not part of the graph above: one search_network_policy retrieval call + one with_structured_output LLM call, not a multi-turn ReAct loop")
+    Component(llmC, "LLM Provider Switch", "backend/agent/llm.py", "_build_base_model() shared by build_agent_model(tools) (tool-calling, used by orchestratorC) and build_structured_model(schema) (with_structured_output, used by recoveryC), both per LLM_PROVIDER")
+    Component(toolsC, "Tools", "backend/agent/tools.py", "Grounding, Computation, Retrieval (search_policy), ask_human, write_determination — plus search_network_policy, reachable only from recoveryC, never from orchestratorC")
     Component(checksC, "Checks & Decision Rule", "backend/agent/checks.py", "REQUIRED_CHECKS per claim type; deterministic compute_decision")
     Component(ledgerC, "Ledger", "backend/agent/ledger.py", "Sole writer of check_ledger / audit_trail / claims.decision")
     Component(episodicC, "Episodic Memory", "backend/agent/episodic.py", "Cross-claim entity facts, keyed lookup")
@@ -148,22 +150,18 @@ C4Component
   Rel(routes, ledgerC, "Logs claim_submitted / human_answer (source: human)", "call")
   Rel(routes, recoveryC, "POST /claims/{id}/recovery -> assess_recovery(claim_id), synchronous (not BackgroundTasks)", "call")
 
-  Rel(worker, orchestratorC, "build_orchestrator_graph(checkpointer).invoke(...) — default", "call")
-  Rel(worker, graphC, "build_graph(checkpointer).invoke(...) — AGENT_MODE=legacy fallback", "call")
+  Rel(worker, orchestratorC, "build_claim_graph(checkpointer).invoke(...)", "call")
   Rel(worker, dbC, "Reads claim row, flips status", "SQL")
 
-  Rel(orchestratorC, graphC, "imports _derive_check_updates / _format_checks / ClaimState / finalize_node / iteration caps — shared, unmodified", "import")
+  Rel(orchestratorC, graphC, "imports _derive_check_updates / _format_checks / ClaimState / finalize_node / iteration caps", "import")
   Rel(orchestratorC, llmC, "MODEL_RESEARCH/MODEL_DECISIONING = build_agent_model(...)", "call")
   Rel(orchestratorC, toolsC, "Research sub-agent: Grounding+Retrieval tools only; Decisioning sub-agent: Computation + ask_human + write_determination", "call")
   Rel(orchestratorC, ledgerC, "update_check / log_audit (source: agent, sub_agent: research|decisioning)", "call")
   Rel(orchestratorC, episodicC, "get_facts (init) / upsert_fact (after grounding calls)", "call")
 
-  Rel(graphC, llmC, "MODEL = build_agent_model(TOOLS)", "call")
   Rel(llmC, llmProvider, "Chat completions (tool_choice=required) / structured-output calls", "HTTPS")
-  Rel(graphC, toolsC, "Invokes exactly one tool per turn", "call")
-  Rel(graphC, checksC, "Required-checks list, termination/decision rule", "call")
-  Rel(graphC, ledgerC, "update_check / log_audit (source: agent) / finalize_decision", "call")
-  Rel(graphC, episodicC, "get_facts (init) / upsert_fact (after grounding calls)", "call")
+  Rel(graphC, checksC, "REQUIRED_CHECKS (initial_state validation)", "import")
+  Rel(graphC, ledgerC, "finalize_decision (from finalize_node)", "call")
 
   Rel(recoveryC, toolsC, "search_network_policy (hardcoded network_recovery filter)", "call")
   Rel(recoveryC, llmC, "build_structured_model(RecoveryAssessment)", "call")
@@ -194,22 +192,20 @@ C4Component
   which calls `checks.compute_decision` on the check ledger's actual PASS/FAIL/BLOCKED
   state (`specs/requirements.md` §6). `orchestrator.py` imports `finalize_node`
   directly rather than reimplementing it — along with `_derive_check_updates`,
-  `_format_checks`, `ClaimState`, and the iteration caps — specifically so the
-  check-ledger/decision rules can never drift between the legacy and orchestrator
-  paths. The Recovery agent's `eligible` judgment is a deliberate, scoped exception to
-  this pattern: it's an LLM-judged, advisory output, not a run through `checks.py`
-  (`specs/technical.md` §5).
+  `_format_checks`, `ClaimState`, and the iteration caps — so the check-ledger/decision
+  rules are defined in exactly one place. The Recovery agent's `eligible` judgment is a
+  deliberate, scoped exception to this pattern: it's an LLM-judged, advisory output,
+  not a run through `checks.py` (`specs/technical.md` §5).
 - **`tools.py` talks to three different stores**: Postgres directly (grounding/
   computation tools), Qdrant (semantic search — `search_policy` for the main
   claim-processing loop, `search_network_policy` exclusively for `recoveryC`), and the
   LLM provider (embeddings for that search — always OpenAI, independent of
   `LLM_PROVIDER`).
-- **`orchestrator.py` vs `graph.py`**: `orchestrator.py` is new code for the
-  supervisor's `act_observe_node` and its two think-nodes (they needed
-  sub_agent-tagging/role-switching logic the legacy loop doesn't have), so there's
-  deliberate duplication of the tool-execution loop *shape* between the two files —
-  but the business rules inside it (check derivation, formatting, decision
-  finalization, iteration caps) are imported, not copied.
+- **`orchestrator.py` vs `graph.py`**: `graph.py` is the graph-agnostic core (state
+  shape, check-derivation rules, `finalize_node`, iteration caps). `orchestrator.py`
+  holds the supervisor's `act_observe_node` and its two think-nodes, and imports the
+  business rules from `graph.py` rather than copying them — so check derivation,
+  formatting, decision finalization, and the caps live in one place.
 - **`recovery.py` is a one-shot judgment, not a ReAct loop**: one retrieval call
   (`search_network_policy`) feeds one `with_structured_output` call
   (`RecoveryAssessment` schema) — no tool-calling turns, no checkpointing, no
@@ -315,10 +311,11 @@ sequenceDiagram
     end
 ```
 
-**Since Phase 7**, `G` ("Agent Graph") in the loop above is `orchestratorC` by default
-(`AGENT_MODE=orchestrator`), not `graphC` — but the externally-visible sequence shape is
-unchanged: `graph.invoke`/`Command(resume=...)`, one shared `act_observe`, the same
-pause/resume/checkpoint mechanics. What changes internally is that "Think" now covers
+**Since Phase 7**, `G` ("Agent Graph") in the loop above is `orchestratorC`
+(`graphC` is now just the shared core it imports, not a runnable graph) — but the
+externally-visible sequence shape is unchanged: `graph.invoke`/`Command(resume=...)`,
+one shared `act_observe`, the same pause/resume/checkpoint mechanics. What changes
+internally is that "Think" now covers
 two distinct roles sharing this same loop shape — a Research turn (Grounding + Retrieval
 tools only) followed by a Decisioning turn (Computation + `ask_human` +
 `write_determination`) — with a supervisor deciding after each `act_observe` round which

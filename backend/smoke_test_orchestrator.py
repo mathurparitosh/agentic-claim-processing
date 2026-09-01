@@ -1,6 +1,11 @@
-"""Phase 7 smoke test: run each synthetic scenario through both the legacy single-agent
-graph and the new orchestrator graph, and compare outcomes (tracker.md Phase 7 -- "same
-claims, same expected outcomes as the legacy agent" after the refactor).
+"""Smoke test: run each synthetic scenario through the orchestrator graph and print the
+decision + full check ledger.
+
+Originally (Phase 7) this ran every scenario through *both* the legacy single-agent
+graph and the orchestrator and diffed them. The legacy graph was removed (tracker.md
+Phase 12), so this is now a plain "run the scenarios, eyeball the outcomes" check --
+`backend/eval_notebook.ipynb` is the one that asserts against predetermined expected
+decisions.
 
     python -m backend.smoke_test_orchestrator
 """
@@ -15,7 +20,6 @@ from langgraph.checkpoint.postgres import PostgresSaver  # noqa: E402
 from langgraph.types import Command  # noqa: E402
 
 from . import db  # noqa: E402
-from .agent.graph import build_graph as build_legacy_graph  # noqa: E402
 from .agent.graph import initial_state  # noqa: E402
 from .agent.orchestrator import build_orchestrator_graph  # noqa: E402
 from .generate_synthetic_data import SCENARIOS  # noqa: E402
@@ -43,12 +47,12 @@ def fetch_result(claim_id: str) -> dict:
     return {"decision": claim_row["decision"], "reason": claim_row["decision_reason"], "checks": checks}
 
 
-def run_scenario(build_graph_fn, claim_type: str, claim_payload: dict) -> dict:
+def run_scenario(claim_type: str, claim_payload: dict) -> dict:
     claim_id = str(uuid4())
     insert_claim(claim_id, claim_type, claim_payload)
 
     with PostgresSaver.from_conn_string(db.DATABASE_URL) as checkpointer:
-        graph = build_graph_fn(checkpointer)
+        graph = build_orchestrator_graph(checkpointer)
         config = {"configurable": {"thread_id": claim_id}}
         result = graph.invoke(initial_state(claim_id, claim_type, claim_payload), config=config)
 
@@ -63,26 +67,13 @@ def run_scenario(build_graph_fn, claim_type: str, claim_payload: dict) -> dict:
 def main():
     db.open_pool()
 
-    all_match = True
     for scenario in SCENARIOS:
         claim_type, claim_payload = scenario["claim_type"], scenario["claim_payload"]
         print(f"\n=== {scenario['account_id']} ({claim_type}) ===")
+        result = run_scenario(claim_type, claim_payload)
+        print(f"  decision={result['decision']!r} reason={result['reason']!r}")
+        print(f"  checks={result['checks']}")
 
-        print("  legacy:")
-        legacy = run_scenario(build_legacy_graph, claim_type, claim_payload)
-        print(f"    decision={legacy['decision']!r} reason={legacy['reason']!r}")
-        print(f"    checks={legacy['checks']}")
-
-        print("  orchestrator:")
-        orchestrator = run_scenario(build_orchestrator_graph, claim_type, claim_payload)
-        print(f"    decision={orchestrator['decision']!r} reason={orchestrator['reason']!r}")
-        print(f"    checks={orchestrator['checks']}")
-
-        match = legacy["decision"] == orchestrator["decision"] and legacy["checks"] == orchestrator["checks"]
-        print(f"  MATCH: {match}")
-        all_match = all_match and match
-
-    print(f"\n=== Overall: {'ALL MATCH' if all_match else 'MISMATCH FOUND'} ===")
     db.close_pool()
 
 

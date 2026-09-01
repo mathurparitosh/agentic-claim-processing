@@ -575,6 +575,67 @@ Built 2026-08-17.
 
 ---
 
+## Phase 12 — Agent-tracing UI (`traceing` branch)
+
+Built 2026-08-31 on branch `traceing` (isolated so it can be dropped wholesale if
+needed). Goal: surface the agent's internals the way the "Agent with Subagent
+LangGraph" teaching project does — inspect Context / Memory / Tools / Graph /
+Sub-agents in tabs — adapted to this app's many-concurrent-claims shape (the reference
+has one agent / one conversation; here each inspector view is scoped to one claim run,
+`thread_id = claim_id`).
+
+### Phase 0 — Remove `AGENT_MODE=legacy`
+
+- [x] 💻 The standalone single-agent Think/Act/Observe graph in `backend/agent/graph.py`
+  (`build_graph`, `init_node`/`think_node`/`act_observe_node`/`route_after_act`, the
+  all-8-tools `MODEL` binding, `SYSTEM_PROMPT_HEADER`, `_build_system_prompt`) was
+  removed. `graph.py` is now just the shared core `orchestrator.py` builds on:
+  `ClaimState`, `_derive_check_updates`, `_format_checks`, `finalize_node`,
+  `MAX_ITERATIONS`/`NO_PROGRESS_LIMIT`, `initial_state`. Kept the filename so
+  `orchestrator.py`'s `from .graph import (...)` and `worker.py`'s
+  `from .agent.graph import initial_state` are unchanged.
+- [x] 💻 `backend/worker.py`: `_build_graph()`'s `AGENT_MODE` switch replaced by
+  `build_claim_graph(checkpointer=None)` — always the orchestrator graph; the
+  `checkpointer=None` path is what the new Graph endpoint compiles for
+  `.get_graph().draw_mermaid()`.
+- [x] 💻 `AGENT_MODE` removed from `.env.example`. `backend/smoke_test_agent.py` deleted;
+  `backend/smoke_test_orchestrator.py` no longer diffs against legacy (just runs each
+  scenario through the orchestrator). Docs synced: `README.md`, `docs/c4-architecture.md`
+  (Level 3 component diagram + notes), `specs/technical.md` §5.
+
+### Phase A — Backend read-only endpoints
+
+- [ ] 💻 `GET /claims/{id}/agent-context` — the model's message window from the
+  checkpointer (`build_claim_graph(cp).get_state(...)`), plus iteration / no-progress /
+  questions-asked counters, `active_agent`, next node, model/provider, token estimate.
+- [ ] 💻 `GET /claims/{id}/memory` — `episodic_facts` for the claim's account, each
+  tagged read-in-at-init vs written-by-this-run, with the originating claim id.
+- [ ] 💻 `GET /agent/tools` — static tool catalog: category, params, owning sub-agent,
+  checks-resolved (`TOOL_CATEGORY` / `TOOL_RESOLVES_CHECKS` maps).
+- [ ] 💻 `GET /agent/graph` — compiled orchestrator graph: `draw_mermaid()` +
+  `draw_ascii()` + per-node prose.
+
+### Phase B — Portal "Agent" tab (Tools + Graph)
+
+- [ ] 💻 New closable, deduped portal tab (`App.jsx` / `TabStrip.jsx`), opened from a
+  header button. `AgentPanel.jsx` with a Tools view and a Graph view (`mermaid` dep,
+  ASCII `<pre>` fallback).
+
+### Phase C — Per-claim inspector tabs
+
+- [ ] 💻 `ClaimDetail.jsx` sub-tab row 3 → 6: add **Context**, **Memory**,
+  **Sub-agents** (Sub-agents derived client-side from the `/audit` data already
+  polled). Existing Checks / Account & Transaction / Audit Trail unchanged.
+
+### Phase D — Live feel
+
+- [ ] 💻 Fold `/agent-context` into `ClaimDetail`'s existing 2s poll while the claim is
+  active; Memory + Sub-agents re-derive each cycle.
+
+*(Phase E — SSE streaming from `worker.run_claim_agent` — explicitly out of scope.)*
+
+---
+
 ## Unassigned — Backlog
 
 Not scheduled into any phase above; revisit if/when the trigger condition below

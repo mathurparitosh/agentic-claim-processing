@@ -171,11 +171,11 @@ bypassed this way.
 **Built 2026-08-17** (tracker.md Phase 7 has the full implementation/verification
 writeup). Two independent structures, not three peer agents sharing one loop:
 
-1. An **orchestrator graph** that replaces the single agent's Think/Act/Observe loop
-   as the default claim-processing path. `backend/agent/graph.py` (today's single
-   agent) stays in the codebase as a selectable fallback via a new env var, mirroring
-   the existing `LLM_PROVIDER` switch pattern (§1) — the orchestrator becomes the
-   default, the legacy single agent isn't deleted.
+1. An **orchestrator graph** that is the claim-processing path. It replaced the
+   original single agent's Think/Act/Observe loop — which was first kept as an
+   `AGENT_MODE=legacy` fallback, then removed once the orchestrator had proven out
+   (tracker.md Phase 12). `backend/agent/graph.py` is now just the shared
+   state / check-ledger / finalize core the orchestrator builds on.
 2. A separate, **on-demand Recovery agent**, triggered per claim after a decision
    already exists — not part of the orchestrator graph's run at all.
 
