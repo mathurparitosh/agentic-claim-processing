@@ -13,12 +13,48 @@ const POLL_MS = 2000;
 const ACTIVE_STATUSES = new Set(['pending', 'processing', 'awaiting_input']);
 const RECOVERY_ELIGIBLE_DECISIONS = new Set(['approve', 'inconclusive']);
 const TABS = [
-  { id: 'checks', label: 'Checks' },
-  { id: 'context', label: 'Account & Transaction' },
-  { id: 'audit', label: 'Audit Trail' },
-  { id: 'agentcontext', label: 'Context' },
-  { id: 'memory', label: 'Memory' },
-  { id: 'subagents', label: 'Sub-agents' },
+  {
+    id: 'checks',
+    label: 'Checks',
+    hint:
+      'The required checks for this claim type and each one’s PASS / FAIL / UNKNOWN / BLOCKED status. ' +
+      'From the check_ledger table (GET /claims/{id}), written by the agent as tools resolve each check.',
+  },
+  {
+    id: 'context',
+    label: 'Account & Transaction',
+    hint:
+      'The account profile and disputed transaction on file for this claim. Read-only lookup of the ' +
+      'account_profiles / transactions fixture tables (GET /claims/{id}/context) — the same data the Grounding tools query.',
+  },
+  {
+    id: 'audit',
+    label: 'Audit Trail',
+    hint:
+      'Every recorded event in the run — tool calls, retrievals, human answers, the determination — oldest first, ' +
+      'each tagged agent or human. From the audit_trail table (GET /claims/{id}/audit).',
+  },
+  {
+    id: 'agentcontext',
+    label: 'Context',
+    hint:
+      'The message list the model is working from right now, plus the run’s iteration / no-progress / question counters. ' +
+      'Reconstructed from the LangGraph checkpoint (GET /claims/{id}/agent-context).',
+  },
+  {
+    id: 'memory',
+    label: 'Memory',
+    hint:
+      'Episodic facts stored for this claim’s account — cross-claim memory read at init and upserted after account lookups. ' +
+      'From the episodic_facts table (GET /claims/{id}/memory).',
+  },
+  {
+    id: 'subagents',
+    label: 'Sub-agents',
+    hint:
+      'How the run split between the Research and Decisioning sub-agents — turns, iteration range, tools used, handoff point. ' +
+      'Derived in the browser from the Audit Trail’s agent_think rows.',
+  },
 ];
 
 const DECISION_LABELS = {
@@ -609,6 +645,7 @@ export default function ClaimDetail({ claimId, onAnswered }) {
             </button>
           ))}
         </div>
+        <p className="tab-hint">{TABS.find((t) => t.id === tab)?.hint}</p>
 
         {tab === 'checks' && (
           <ul className="check-list">

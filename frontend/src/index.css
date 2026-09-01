@@ -254,6 +254,13 @@ label {
 }
 .tab:hover { color: var(--accent); border-color: transparent; }
 .tab-active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+.tab-hint {
+  color: #1e3a8a;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  margin: -0.6rem 0 1rem;
+  max-width: 80ch;
+}
 
 /* Account & Transaction */
 .context-panel {
