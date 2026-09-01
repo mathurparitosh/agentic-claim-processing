@@ -1,5 +1,5 @@
 import { lazy, Suspense, useState } from 'react';
-import { getStoredPassword, clearStoredPassword } from './api';
+import { getStoredPassword, getRole, clearStoredPassword } from './api';
 import PasswordGate from './components/PasswordGate';
 import ClaimForm from './components/ClaimForm';
 import ClaimList from './components/ClaimList';
@@ -21,17 +21,28 @@ function nextTabId(prefix) {
 
 export default function App() {
   const [authenticated, setAuthenticated] = useState(!!getStoredPassword());
+  const [role, setRole] = useState(getRole());
   const [tabs, setTabs] = useState([LIST_TAB]);
   const [activeTabId, setActiveTabId] = useState(LIST_TAB_ID);
   const [refreshToken, setRefreshToken] = useState(0);
 
   if (!authenticated) {
-    return <PasswordGate onAuthenticated={() => setAuthenticated(true)} />;
+    return (
+      <PasswordGate
+        onAuthenticated={(r) => {
+          setRole(r || getRole());
+          setAuthenticated(true);
+        }}
+      />
+    );
   }
+
+  const isAdmin = role === 'admin';
 
   function handleLogout() {
     clearStoredPassword();
     setAuthenticated(false);
+    setRole('');
     setTabs([LIST_TAB]);
     setActiveTabId(LIST_TAB_ID);
   }
@@ -54,6 +65,7 @@ export default function App() {
   }
 
   function openAgentTab() {
+    if (!isAdmin) return;
     if (!tabs.some((t) => t.id === AGENT_TAB_ID)) {
       setTabs([...tabs, { id: AGENT_TAB_ID, kind: 'agent' }]);
     }
@@ -85,7 +97,10 @@ export default function App() {
       <header className="app-header">
         <h1>Claim Assistant</h1>
         <div className="app-header-actions">
-          <button className="agent-btn" onClick={openAgentTab}>Agent</button>
+          <span className="app-role-badge" title="Logged-in role">{role || 'admin'}</span>
+          {isAdmin && (
+            <button className="agent-btn" onClick={openAgentTab}>Agent</button>
+          )}
           <button className="start-claim-btn" onClick={openNewClaimTab}>Start Claim</button>
           <button className="logout" onClick={handleLogout}>Log out</button>
         </div>
@@ -95,15 +110,19 @@ export default function App() {
         {tabs.map((tab) => (
           <div key={tab.id} className="tab-panel" style={{ display: tab.id === activeTabId ? 'block' : 'none' }}>
             {tab.kind === 'list' && (
-              <ClaimList openClaimIds={openClaimIds} onSelect={openClaimTab} refreshToken={refreshToken} />
+              <ClaimList openClaimIds={openClaimIds} onSelect={openClaimTab} refreshToken={refreshToken} role={role} />
             )}
             {tab.kind === 'new-claim' && (
               <ClaimForm onSubmitted={(claimId) => handleClaimSubmitted(tab.id, claimId)} />
             )}
             {tab.kind === 'detail' && (
-              <ClaimDetail claimId={tab.claimId} onAnswered={() => setRefreshToken((t) => t + 1)} />
+              <ClaimDetail
+                claimId={tab.claimId}
+                role={role}
+                onAnswered={() => setRefreshToken((t) => t + 1)}
+              />
             )}
-            {tab.kind === 'agent' && (
+            {tab.kind === 'agent' && isAdmin && (
               <Suspense fallback={<p className="muted">Loading…</p>}>
                 <AgentPanel />
               </Suspense>

@@ -482,7 +482,13 @@ function AuditPanel({ entries, loading }) {
   );
 }
 
-export default function ClaimDetail({ claimId, onAnswered }) {
+// Tabs added in the Phase 12 tracing work — admin only. processor / customer see the
+// record views (Checks / Account & Transaction / Audit Trail) without these.
+const TRACE_TAB_IDS = new Set(['agentcontext', 'memory', 'subagents']);
+
+export default function ClaimDetail({ claimId, role, onAnswered }) {
+  const isAdmin = role === 'admin';
+  const visibleTabs = isAdmin ? TABS : TABS.filter((t) => !TRACE_TAB_IDS.has(t.id));
   const [claim, setClaim] = useState(null);
   const [context, setContext] = useState(null);
   const [audit, setAudit] = useState(null);
@@ -501,13 +507,13 @@ export default function ClaimDetail({ claimId, onAnswered }) {
 
     async function poll() {
       try {
-        // agent-context / memory degrade to null on error (transient checkpoint read,
-        // etc.) rather than red-bannering the whole detail view.
+        // agent-context / memory are admin-only (403 otherwise) and degrade to null on
+        // any error rather than red-bannering the whole detail view.
         const [claimData, auditData, agentCtx, mem] = await Promise.all([
           getClaim(claimId),
           getAudit(claimId),
-          getAgentContext(claimId).catch(() => null),
-          getAgentMemory(claimId).catch(() => null),
+          isAdmin ? getAgentContext(claimId).catch(() => null) : Promise.resolve(null),
+          isAdmin ? getAgentMemory(claimId).catch(() => null) : Promise.resolve(null),
         ]);
         if (cancelled) return;
         setClaim(claimData);
@@ -541,7 +547,7 @@ export default function ClaimDetail({ claimId, onAnswered }) {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [claimId]);
+  }, [claimId, isAdmin]);
 
   async function submitAnswer(answer) {
     setAnswering(true);
@@ -634,7 +640,7 @@ export default function ClaimDetail({ claimId, onAnswered }) {
         )}
 
         <div className="tabs">
-          {TABS.map((t) => (
+          {visibleTabs.map((t) => (
             <button
               key={t.id}
               type="button"
@@ -645,7 +651,7 @@ export default function ClaimDetail({ claimId, onAnswered }) {
             </button>
           ))}
         </div>
-        <p className="tab-hint">{TABS.find((t) => t.id === tab)?.hint}</p>
+        <p className="tab-hint">{visibleTabs.find((t) => t.id === tab)?.hint}</p>
 
         {tab === 'checks' && (
           <ul className="check-list">
@@ -654,11 +660,11 @@ export default function ClaimDetail({ claimId, onAnswered }) {
             ))}
           </ul>
         )}
-        {tab === 'agentcontext' && <ContextTab data={agentContext} loading={!agentContext} />}
-        {tab === 'memory' && <MemoryTab data={memory} loading={!memory} />}
         {tab === 'context' && <ContextPanel context={context} loading={!context} />}
         {tab === 'audit' && <AuditPanel entries={audit} loading={!audit} />}
-        {tab === 'subagents' && <SubAgentsTab audit={audit} activeAgent={agentContext?.active_agent} />}
+        {isAdmin && tab === 'agentcontext' && <ContextTab data={agentContext} loading={!agentContext} />}
+        {isAdmin && tab === 'memory' && <MemoryTab data={memory} loading={!memory} />}
+        {isAdmin && tab === 'subagents' && <SubAgentsTab audit={audit} activeAgent={agentContext?.active_agent} />}
 
         {error && <p className="error">{error}</p>}
       </div>

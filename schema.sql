@@ -11,8 +11,15 @@ CREATE TABLE IF NOT EXISTS claims (
     -- Set while status = 'awaiting_input': {"question": ..., "check_name": ...} from
     -- the ask_human tool's interrupt payload (backend/agent/tools.py). Cleared on answer.
     pending_question JSONB,
+    -- Username of the user who submitted the claim (backend/auth.py: admin | processor
+    -- | customer). Used to scope a customer to only the claims they filed. NULL for
+    -- rows created before multi-user auth existed.
+    filed_by TEXT,
     last_updated TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- Retrofit for databases created before `filed_by` was added (CREATE TABLE above
+-- won't add columns to an existing table).
+ALTER TABLE claims ADD COLUMN IF NOT EXISTS filed_by TEXT;
 
 CREATE TABLE IF NOT EXISTS check_ledger (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

@@ -61,13 +61,33 @@ label {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 10px;
-  padding: 2.5rem;
-  width: 320px;
+  padding: 2.25rem;
+  width: 360px;
   text-align: center;
 }
 .gate-form h1 { margin-top: 0; font-size: 1.3rem; }
-.gate-form input { margin: 1rem 0; }
-.gate-form button { width: 100%; }
+.gate-form > p { margin: 0.25rem 0 1.25rem; color: var(--muted); font-size: 0.85rem; }
+.gate-form > button[type='submit'] { width: 100%; margin-top: 0.5rem; }
+
+.gate-users { display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 1.25rem; }
+.gate-user {
+  display: flex; flex-direction: column; gap: 0.15rem;
+  text-align: left; padding: 0.6rem 0.8rem; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--panel);
+}
+.gate-user:not(:disabled):hover { border-color: var(--accent); color: inherit; }
+.gate-user-active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.gate-user-name { font-weight: 600; font-size: 0.85rem; text-transform: capitalize; }
+.gate-user-blurb { font-size: 0.73rem; color: var(--muted); line-height: 1.35; }
+
+.gate-field { text-align: left; margin-bottom: 0.75rem; }
+.gate-field input { margin: 0.25rem 0 0; }
+
+.app-role-badge {
+  font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em;
+  padding: 0.15rem 0.55rem; border-radius: 999px;
+  background: #e0e7ff; color: #4338ca; white-space: nowrap;
+}
 
 /* App shell */
 .app { display: flex; flex-direction: column; height: 100vh; }

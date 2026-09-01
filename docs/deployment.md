@@ -198,12 +198,19 @@ pg_dump "$DEV_DATABASE_URL" -t account_profiles -t transactions -t access_logs -
 ```bash
 cd /opt/claim-assistant/frontend
 npm ci
-VITE_API_BASE_URL=/api npm run build
+# VITE_DEMO_PASSWORD is the value the login screen's admin/processor/customer
+# quick-pick buttons prefill into the password field. Set it to your real
+# AUTH_PASSWORD for one-click demo logins, or to '' to disable prefill (users
+# then type the password; the username is still prefilled).
+VITE_API_BASE_URL=/api VITE_DEMO_PASSWORD='your-AUTH_PASSWORD-or-blank' npm run build
 ```
 
 - [ ] `frontend/dist/index.html` and `frontend/dist/assets/…` regenerated (don't rely on the copy committed in the repo — it's built for `localhost:8000`)
 - [ ] `grep -r "localhost:8000" dist/` returns **nothing**
 - [ ] `grep -rl "/api/" dist/assets/*.js` finds the API base baked in
+- [ ] The three demo users (`admin` / `processor` / `customer`, all using `AUTH_PASSWORD`)
+      log in and land on their expected view — decide whether baking `VITE_DEMO_PASSWORD`
+      into the bundle is acceptable for your deployment
 
 ---
 
@@ -283,7 +290,9 @@ sudo certbot --nginx -d claims.example.com
 
 Open `http://SERVER_IP/` (or your https domain) in a browser:
 
-- [ ] Password gate appears → enter `AUTH_PASSWORD` → lands on the **Claims** list
+- [ ] Password gate appears → pick **Admin** (or enter `admin` + `AUTH_PASSWORD`) → lands on the **Claims** list
+- [ ] Log out → pick **Processor** → the **Agent** button and the Context / Memory / Sub-agents claim tabs are gone
+- [ ] Log out → pick **Customer** → "My Claims" is empty until you file one; other users' claims are not listed
 - [ ] **Start Claim** → submit one
   - with fixtures: `fraud` / account `ACC-9001` / transaction `TXN-7001`
   - without: any real account/transaction you loaded
@@ -314,7 +323,7 @@ backend/.venv/bin/pip install -r backend/requirements.txt
 psql "$DATABASE_URL" -f schema.sql
 
 # frontend (only if frontend/ changed)
-cd frontend && npm ci && VITE_API_BASE_URL=/api npm run build && cd ..
+cd frontend && npm ci && VITE_API_BASE_URL=/api VITE_DEMO_PASSWORD='...' npm run build && cd ..
 
 # corpus (only if docs/files/*.md changed — idempotent)
 backend/.venv/bin/python scripts/ingest_policy_corpus.py

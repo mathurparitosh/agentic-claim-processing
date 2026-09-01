@@ -1,5 +1,10 @@
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 const PASSWORD_KEY = 'claim-assistant-password';
+const USER_KEY = 'claim-assistant-user';
+
+/** The three demo users, all sharing AUTH_PASSWORD; username == role (backend/auth.py). */
+export const USERS = ['admin', 'processor', 'customer'];
+export const ROLES = USERS;
 
 export function getStoredPassword() {
   return sessionStorage.getItem(PASSWORD_KEY) || '';
@@ -9,19 +14,35 @@ export function setStoredPassword(password) {
   sessionStorage.setItem(PASSWORD_KEY, password);
 }
 
+export function getStoredUser() {
+  return sessionStorage.getItem(USER_KEY) || '';
+}
+
+export function setStoredUser(username) {
+  sessionStorage.setItem(USER_KEY, username);
+}
+
+/** Role of the logged-in user (== username here). '' when logged out. */
+export function getRole() {
+  return getStoredUser();
+}
+
 export function clearStoredPassword() {
   sessionStorage.removeItem(PASSWORD_KEY);
+  sessionStorage.removeItem(USER_KEY);
 }
 
 class UnauthorizedError extends Error {}
 
 async function request(path, options = {}) {
   const password = getStoredPassword();
+  const username = getStoredUser() || 'admin';
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${password}`,
+      'X-Username': username,
       ...options.headers,
     },
   });
@@ -38,9 +59,9 @@ async function request(path, options = {}) {
   return res.json();
 }
 
-/** Cheap auth check: any authenticated GET works, /claims is always safe (no side effects). */
+/** Confirms the password + resolves the caller's role; returns {username, role}. */
 export function checkAuth() {
-  return request('/claims?limit=1');
+  return request('/whoami');
 }
 
 export function listClaims() {

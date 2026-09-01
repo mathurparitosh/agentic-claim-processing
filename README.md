@@ -78,7 +78,8 @@ Full mapping (check → resolving tool → PASS/FAIL semantics) in
 
 ```
 backend/
-  main.py                     FastAPI app + routes + shared-password auth
+  main.py                     FastAPI app + routes
+  auth.py                     shared-password gate + admin/processor/customer roles (X-Username)
   worker.py                   run_claim_agent / resume_claim_agent (BackgroundTasks); build_claim_graph()
   db.py                       pooled psycopg connection helper; loads .env.local
   agent/
@@ -174,20 +175,30 @@ python -m backend.generate_synthetic_data
 
 - **Frontend:** http://localhost:5173
 - **Backend API:** http://localhost:8000
-- **Auth:** send `Authorization: Bearer <AUTH_PASSWORD>` (value from `.env.local`);
-  the frontend password gate asks for the same value.
+- **Auth:** send `Authorization: Bearer <AUTH_PASSWORD>` (value from `.env.local`) plus
+  `X-Username: admin|processor|customer` (omit → `admin`). The three demo users share
+  the one password; the username only selects a **role** (`backend/auth.py`):
+  - `admin` — everything, including the Agent tab and the per-claim Context / Memory /
+    Sub-agents tracing tabs
+  - `processor` — every claim, but no Agent tab and no tracing tabs
+  - `customer` — may only file claims and see the claims they filed
+  The frontend password gate has one-click buttons for each.
 - **Logs:** `backend/uvicorn.log`, `frontend/vite.log`
 
 ---
 
 ## API Endpoints
 
-All `/claims*` and `/accounts*` routes require `Authorization: Bearer <AUTH_PASSWORD>`.
+All `/claims*` and `/accounts*` routes require `Authorization: Bearer <AUTH_PASSWORD>`
+(and honour `X-Username` for role — see Quick Start). `/agent/*` and the per-claim
+`agent-context` / `memory` routes are **admin only**; `POST /claims/{id}/recovery` is
+blocked for `customer`; a `customer` only sees claims where `filed_by` is their username.
 
 | Method & path | Purpose |
 |---|---|
 | `GET /` | Health check (unauthenticated) |
-| `POST /claims` | Submit a claim; enqueues the agent run via `BackgroundTasks` |
+| `GET /whoami` | Echo the caller's `{username, role}` (used by the frontend login) |
+| `POST /claims` | Submit a claim (records `filed_by`); enqueues the agent run via `BackgroundTasks` |
 | `GET /claims?limit=` | List claims with status/decision |
 | `GET /claims/{id}` | Claim detail + check ledger |
 | `GET /claims/{id}/context` | Account profile + disputed-transaction detail |
@@ -195,7 +206,11 @@ All `/claims*` and `/accounts*` routes require `Authorization: Bearer <AUTH_PASS
 | `GET /claims/{id}/questions` | Pending `ask_human` question, if the run is paused |
 | `POST /claims/{id}/answer` | Answer a pending question; resumes the run |
 | `GET /claims/{id}/decision` | Final decision + evidentiary basis |
-| `POST /claims/{id}/recovery` | Trigger the on-demand Recovery agent (`approve`/`inconclusive` only) |
+| `POST /claims/{id}/recovery` | Trigger the on-demand Recovery agent (`approve`/`inconclusive` only; not for `customer`) |
+| `GET /claims/{id}/agent-context` | **admin** — the model's live message window + run counters (Context tab) |
+| `GET /claims/{id}/memory` | **admin** — episodic facts for the claim's account (Memory tab) |
+| `GET /agent/tools` | **admin** — static tool catalog (Agent tab) |
+| `GET /agent/graph` | **admin** — compiled orchestrator graph, Mermaid + ASCII (Agent tab) |
 | `GET /accounts` | List accounts |
 | `GET /accounts/{id}/transactions` | Transactions for an account |
 
@@ -272,8 +287,10 @@ Defined in `.env.example`; copy to `.env.local` (gitignored — never commit) an
 
 ## Known Limitations
 
-- **Auth is a single shared password** — the audit trail cannot attribute an action to
-  a specific processor if more than one person uses the app.
+- **Auth is one shared password with fixed roles** — `admin` / `processor` / `customer`
+  all authenticate with the same `AUTH_PASSWORD`; the `X-Username` header picks the role
+  (`backend/auth.py`). There are no per-user secrets and no real identity provider, so
+  the audit trail still can't distinguish two people using the same role.
 - **RAG reranking is not implemented** — `search_policy` sorts the top-20 Qdrant
   candidates by raw cosine score and truncates to top-3; the LLM rerank described in
   `technical.md` was never wired up (`tracker.md` Phase 3).

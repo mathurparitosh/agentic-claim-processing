@@ -662,6 +662,35 @@ has one agent / one conversation; here each inspector view is scoped to one clai
 
 *(Phase E — SSE streaming from `worker.run_claim_agent` — explicitly out of scope.)*
 
+### Phase F — Role-scoped views (`admin` / `processor` / `customer`)
+
+- [x] 💻 `backend/auth.py` (new) — three fixed users sharing `AUTH_PASSWORD`; the
+  `X-Username` header selects a role (missing → `admin`, so existing curl/tests are
+  unaffected). `require_auth` now returns an `Identity`; `require_admin` gates the
+  agent-tracing endpoints.
+- [x] 💻 `claims` gains a `filed_by TEXT` column (`schema.sql` + `ALTER … IF NOT
+  EXISTS`; applied to the dev DB). `POST /claims` records the submitting username;
+  `GET /claims` filters to `filed_by = <user>` for a customer; a `require_claim_access`
+  dependency 404s a customer on any `/claims/{id}/*` route for a claim they didn't
+  file. `/agent/*` + `/claims/{id}/agent-context` + `/claims/{id}/memory` are
+  admin-only (403); `POST /claims/{id}/recovery` is blocked for customers (403). New
+  `GET /whoami` returns `{username, role}` for the frontend login.
+- [x] 💻 Frontend: `PasswordGate` gets a username field + one-click **Admin /
+  Processor / Customer** buttons (prefill username, and password from
+  `VITE_DEMO_PASSWORD` — defaults to `password`, this repo's dev value). `api.js`
+  stores the user, sends `X-Username`, exposes `getRole()`. `App.jsx` shows a role
+  badge, hides the **Agent** button for non-admin. `ClaimDetail` drops the Context /
+  Memory / Sub-agents tabs (and skips their fetches) for non-admin. `ClaimList` shows
+  "My Claims" for a customer.
+- [x] 💻 Verified — backend (TestClient): whoami per role, unknown user → 401, agent
+  endpoints admin-200 / processor-403 / customer-403, customer list scoped to own,
+  customer 404 on a foreign claim's detail/context/audit/decision, customer 403 on own
+  recovery, bearer-only (no `X-Username`) still works as admin. Browser (Playwright,
+  all three roles): admin sees 6 sub-tabs + Agent button; processor sees 3 sub-tabs, no
+  Agent button; customer sees "My Claims" (empty — the 3 legacy `filed_by IS NULL`
+  claims are correctly hidden), no Agent button, Start Claim present; quick-pick
+  prefills both fields. No app console errors.
+
 ---
 
 ## Unassigned — Backlog

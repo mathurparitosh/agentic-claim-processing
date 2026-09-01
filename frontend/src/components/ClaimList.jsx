@@ -11,9 +11,10 @@ const STATUS_LABELS = {
   completed: 'Completed',
 };
 
-export default function ClaimList({ openClaimIds, onSelect, refreshToken }) {
+export default function ClaimList({ openClaimIds, onSelect, refreshToken, role }) {
   const [claims, setClaims] = useState([]);
   const [error, setError] = useState('');
+  const isCustomer = role === 'customer';
 
   useEffect(() => {
     let cancelled = false;
@@ -40,9 +41,11 @@ export default function ClaimList({ openClaimIds, onSelect, refreshToken }) {
 
   return (
     <div className="claim-list">
-      <h2>Claims</h2>
+      <h2>{isCustomer ? 'My Claims' : 'Claims'}</h2>
       {error && <p className="error">{error}</p>}
-      {claims.length === 0 && <p className="muted">No claims yet.</p>}
+      {claims.length === 0 && (
+        <p className="muted">{isCustomer ? 'You have not filed any claims yet.' : 'No claims yet.'}</p>
+      )}
       <ul>
         {claims.map((c) => (
           <li
