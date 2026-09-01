@@ -642,6 +642,19 @@ has one agent / one conversation; here each inspector view is scoped to one clai
   poll (both degrade to `null` on a transient error rather than red-bannering the
   view); Sub-agents re-derives each cycle. Context tab tracks a running claim live.
 
+### Verification
+
+- [x] 💻 **Real browser** (Playwright driving Chrome for Testing against the running
+  `scripts/start.sh` stack): login → Agent tab opens → Tools view lists tools grouped
+  by category with per-sub-agent ownership cards → Graph view renders the Mermaid
+  diagram (`__start__ → init → think_research → act_observe → …`) and the ASCII toggle
+  works → open a completed claim → the 6 sub-tabs are present → Context shows the live
+  header (`messages 36 · ≈ tokens 8,802 · iteration 9/12 · active decisioning · next
+  done · model …`) with expandable message rows → Memory shows the account's episodic
+  fact tagged "written by this claim" → Sub-agents shows Research (turns 5, iters 1–5)
+  vs Decisioning · active (turns 4, iters 6–9) → Agent tab closes cleanly. Zero app
+  console errors (the pre-existing `favicon.ico` 404 aside).
+
 *(Phase E — SSE streaming from `worker.run_claim_agent` — explicitly out of scope.)*
 
 ---
