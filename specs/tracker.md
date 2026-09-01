@@ -552,6 +552,11 @@ Built 2026-08-17.
 
 ## Phase 10 — Deployment (your Ubuntu server)
 
+> Full step-by-step guide + checklist: [`docs/deployment.md`](../docs/deployment.md)
+> (Nginx serving `frontend/dist` + `/api/` proxy → systemd/uvicorn `backend.main:app`
+> (1 worker) + local Postgres; Qdrant Cloud and OpenAI stay external). The bullets
+> below are the original outline; `docs/deployment.md` expands each one.
+
 - [ ] 🌐 SSH into the server
 - [ ] 🌐 Install system packages: Python 3.11+, Node.js/npm, PostgreSQL server, Nginx, git
 - [ ] 🌐 Create a Postgres DB + user on the server; apply `schema.sql`; note the connection string

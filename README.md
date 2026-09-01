@@ -265,6 +265,7 @@ Defined in `.env.example`; copy to `.env.local` (gitignored — never commit) an
 | [`specs/tracker.md`](specs/tracker.md) | Phase-by-phase implementation log (Phases 0–11) with the bugs found and fixed along the way |
 | [`specs/eval_claims.md`](specs/eval_claims.md) | The 10 eval claims and their predetermined outcomes |
 | [`docs/c4-architecture.md`](docs/c4-architecture.md) | C4 diagrams (Mermaid): system context, containers, components, claim lifecycle |
+| [`docs/deployment.md`](docs/deployment.md) | Step-by-step guide + checklist for deploying to a single Linux server (Nginx + systemd/uvicorn + Postgres) |
 | [`docs/files/00_CORPUS_INDEX.md`](docs/files/00_CORPUS_INDEX.md) | Policy-corpus map: documents, superseded pairs, near-duplicates, deliberate coverage gaps |
 
 ---
