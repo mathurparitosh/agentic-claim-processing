@@ -374,3 +374,88 @@ label {
   font-size: 0.75rem;
   overflow-x: auto;
 }
+
+/* ============================================================
+   Agent-tracing UI (tracker.md Phase 12)
+   ============================================================ */
+
+/* Portal-level Agent tab */
+.agent-btn { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.agent-panel { max-width: 900px; }
+.agent-panel h2 { margin: 0 0 0.25rem; }
+.agent-panel-intro { margin: 0 0 1rem; max-width: 60ch; }
+.agent-panel h4 { margin: 1.25rem 0 0.5rem; font-size: 0.9rem; }
+
+.agent-owner-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-bottom: 0.5rem; }
+.agent-owner-card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 0.9rem 1rem; }
+.agent-owner-card h3 { margin: 0 0 0.5rem; font-size: 0.9rem; font-weight: 500; }
+.agent-owner-line { margin: 0.3rem 0; font-size: 0.8rem; line-height: 1.7; }
+.agent-owner-line .muted { margin-right: 0.35rem; }
+
+.agent-tool-list, .agent-msg-list, .subagent-list { list-style: none; padding: 0; margin: 0; }
+.agent-tool-row { border: 1px solid var(--border); border-radius: 8px; padding: 0.6rem 0.9rem; margin-bottom: 0.5rem; background: var(--panel); }
+.agent-tool-head { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.agent-tool-name { font-size: 0.82rem; font-weight: 600; }
+.agent-tool-desc { margin: 0.35rem 0; font-size: 0.8rem; color: var(--text); }
+.agent-tool-meta { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.75rem; color: var(--muted); }
+.agent-tool-meta code, .agent-owner-line code, .agent-graph-nodes code, .subagent-col code {
+  font-size: 0.72rem; background: #f3f4f6; padding: 0.08rem 0.4rem; border-radius: 5px; margin: 0 0.15rem 0.15rem 0; display: inline-block;
+}
+.agent-tool-meta code.param-required { background: #e0e7ff; color: #4338ca; }
+
+/* Graph view */
+.agent-graph-toggle { margin-bottom: 0.75rem; }
+.mermaid-diagram { overflow-x: auto; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 1rem; }
+.mermaid-diagram svg { max-width: 100%; height: auto; }
+.agent-graph-ascii, .agent-context-raw {
+  overflow-x: auto; background: #0f172a; color: #e2e8f0; border-radius: 8px;
+  padding: 1rem; font-size: 0.72rem; line-height: 1.35;
+}
+.agent-graph-nodes { display: grid; grid-template-columns: auto 1fr; gap: 0.35rem 1rem; font-size: 0.8rem; margin: 0; }
+.agent-graph-nodes dt { }
+.agent-graph-nodes dd { margin: 0; color: var(--muted); }
+
+/* Per-claim Context tab */
+.context-tracing-header {
+  display: flex; flex-wrap: wrap; gap: 0.5rem 1.5rem; align-items: baseline;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  padding: 0.75rem 1rem; margin-bottom: 1rem; font-size: 0.82rem;
+}
+.context-tracing-header .label { color: var(--muted); margin-right: 0.35rem; }
+.context-window-note { font-size: 0.8rem; color: var(--muted); margin: 0 0 0.75rem; max-width: 70ch; }
+.agent-msg-row { border: 1px solid var(--border); border-radius: 8px; margin-bottom: 0.4rem; overflow: hidden; background: var(--panel); }
+.agent-msg-summary {
+  width: 100%; display: flex; align-items: center; gap: 0.6rem; text-align: left;
+  background: var(--panel); border: none; border-radius: 0; padding: 0.5rem 0.85rem;
+}
+.agent-msg-role {
+  font-family: ui-monospace, monospace; font-size: 0.7rem; font-weight: 700;
+  text-transform: uppercase; padding: 0.1rem 0.45rem; border-radius: 5px; white-space: nowrap;
+}
+.role-system { background: #e5e7eb; color: #4b5563; }
+.role-human { background: #fce7f3; color: #be185d; }
+.role-ai { background: #e0e7ff; color: #4338ca; }
+.role-tool { background: #dcfce7; color: #15803d; }
+.agent-msg-preview { flex: 1; min-width: 0; font-size: 0.78rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-msg-toolcall { font-family: ui-monospace, monospace; font-size: 0.72rem; color: #6d28d9; white-space: nowrap; }
+.agent-msg-body { margin: 0; padding: 0.75rem 0.9rem; background: #f9fafb; border-top: 1px solid var(--border); font-size: 0.74rem; white-space: pre-wrap; overflow-x: auto; }
+
+/* Per-claim Memory tab */
+.memory-empty { color: var(--muted); font-size: 0.85rem; }
+.memory-row { border: 1px solid var(--border); border-radius: 8px; padding: 0.6rem 0.9rem; margin-bottom: 0.5rem; background: var(--panel); }
+.memory-row-head { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.memory-key { font-family: ui-monospace, monospace; font-size: 0.8rem; font-weight: 600; }
+.memory-origin-pill { font-size: 0.68rem; padding: 0.12rem 0.5rem; border-radius: 999px; background: #e5e7eb; color: #4b5563; white-space: nowrap; }
+.memory-origin-this { background: #dbeafe; color: #1d4ed8; }
+.memory-value { margin: 0.4rem 0 0; padding: 0.5rem 0.75rem; background: #f9fafb; border-radius: 6px; font-size: 0.73rem; overflow-x: auto; }
+
+/* Per-claim Sub-agents tab */
+.subagent-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+.subagent-col { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 0.9rem 1rem; }
+.subagent-col.subagent-col-active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.subagent-col h3 { margin: 0 0 0.5rem; font-size: 0.9rem; }
+.subagent-stat { font-size: 0.8rem; margin: 0.25rem 0; }
+.subagent-stat .muted { margin-right: 0.35rem; }
+.subagent-turns { list-style: none; padding: 0; margin: 0.5rem 0 0; }
+.subagent-turn { font-size: 0.75rem; padding: 0.25rem 0; border-top: 1px solid var(--border); font-family: ui-monospace, monospace; }
+.subagent-handoff { font-size: 0.8rem; color: var(--muted); margin: 0.75rem 0 0; }

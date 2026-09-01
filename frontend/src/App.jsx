@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { lazy, Suspense, useState } from 'react';
 import { getStoredPassword, clearStoredPassword } from './api';
 import PasswordGate from './components/PasswordGate';
 import ClaimForm from './components/ClaimForm';
@@ -6,8 +6,12 @@ import ClaimList from './components/ClaimList';
 import ClaimDetail from './components/ClaimDetail';
 import TabStrip from './components/TabStrip';
 
+// Lazy so mermaid (a large dep, only used here) stays out of the initial bundle.
+const AgentPanel = lazy(() => import('./components/AgentPanel'));
+
 const LIST_TAB_ID = 'list';
 const LIST_TAB = { id: LIST_TAB_ID, kind: 'list' };
+const AGENT_TAB_ID = 'agent';
 
 let tabSeq = 0;
 function nextTabId(prefix) {
@@ -49,6 +53,13 @@ export default function App() {
     setActiveTabId(tab.id);
   }
 
+  function openAgentTab() {
+    if (!tabs.some((t) => t.id === AGENT_TAB_ID)) {
+      setTabs([...tabs, { id: AGENT_TAB_ID, kind: 'agent' }]);
+    }
+    setActiveTabId(AGENT_TAB_ID);
+  }
+
   function closeTab(tabId) {
     if (tabId === LIST_TAB_ID) return;
     const index = tabs.findIndex((t) => t.id === tabId);
@@ -74,6 +85,7 @@ export default function App() {
       <header className="app-header">
         <h1>Claim Assistant</h1>
         <div className="app-header-actions">
+          <button className="agent-btn" onClick={openAgentTab}>Agent</button>
           <button className="start-claim-btn" onClick={openNewClaimTab}>Start Claim</button>
           <button className="logout" onClick={handleLogout}>Log out</button>
         </div>
@@ -90,6 +102,11 @@ export default function App() {
             )}
             {tab.kind === 'detail' && (
               <ClaimDetail claimId={tab.claimId} onAnswered={() => setRefreshToken((t) => t + 1)} />
+            )}
+            {tab.kind === 'agent' && (
+              <Suspense fallback={<p className="muted">Loading…</p>}>
+                <AgentPanel />
+              </Suspense>
             )}
           </div>
         ))}

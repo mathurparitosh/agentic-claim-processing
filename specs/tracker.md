@@ -605,32 +605,42 @@ has one agent / one conversation; here each inspector view is scoped to one clai
 
 ### Phase A — Backend read-only endpoints
 
-- [ ] 💻 `GET /claims/{id}/agent-context` — the model's message window from the
+- [x] 💻 `GET /claims/{id}/agent-context` — the model's message window from the
   checkpointer (`build_claim_graph(cp).get_state(...)`), plus iteration / no-progress /
   questions-asked counters, `active_agent`, next node, model/provider, token estimate.
-- [ ] 💻 `GET /claims/{id}/memory` — `episodic_facts` for the claim's account, each
-  tagged read-in-at-init vs written-by-this-run, with the originating claim id.
-- [ ] 💻 `GET /agent/tools` — static tool catalog: category, params, owning sub-agent,
-  checks-resolved (`TOOL_CATEGORY` / `TOOL_RESOLVES_CHECKS` maps).
-- [ ] 💻 `GET /agent/graph` — compiled orchestrator graph: `draw_mermaid()` +
-  `draw_ascii()` + per-node prose.
+- [x] 💻 `GET /claims/{id}/memory` — `episodic_facts` for the claim's account, each
+  tagged written-by-this-claim vs carried in from an earlier one, with the originating
+  claim id.
+- [x] 💻 `GET /agent/tools` — static tool catalog: category, params, owning sub-agent,
+  checks-resolved (new `TOOL_CATEGORY` / `TOOL_RESOLVES_CHECKS` maps in `tools.py`).
+- [x] 💻 `GET /agent/graph` — compiled orchestrator graph: `draw_mermaid()` +
+  `draw_ascii()` (needs `grandalf`, added to requirements) + per-node prose. Both
+  static views memoized. New module `backend/agent/tracing.py` holds all four.
+- [x] 💻 Verified via `TestClient` against the dev DB: 200 with data, 401 without auth,
+  404 for an unknown claim; shapes match what the frontend components consume.
 
 ### Phase B — Portal "Agent" tab (Tools + Graph)
 
-- [ ] 💻 New closable, deduped portal tab (`App.jsx` / `TabStrip.jsx`), opened from a
-  header button. `AgentPanel.jsx` with a Tools view and a Graph view (`mermaid` dep,
-  ASCII `<pre>` fallback).
+- [x] 💻 New closable, deduped portal tab (`App.jsx` / `TabStrip.jsx`), opened from an
+  "Agent" header button. `AgentPanel.jsx` (lazy-loaded so `mermaid` stays out of the
+  initial bundle) with a Tools view (per-sub-agent ownership cards + tools grouped by
+  category) and a Graph view (`mermaid` render, `ASCII` toggle + auto-fallback, node
+  prose). `frontend/package.json` gains `mermaid@11`.
 
 ### Phase C — Per-claim inspector tabs
 
-- [ ] 💻 `ClaimDetail.jsx` sub-tab row 3 → 6: add **Context**, **Memory**,
-  **Sub-agents** (Sub-agents derived client-side from the `/audit` data already
-  polled). Existing Checks / Account & Transaction / Audit Trail unchanged.
+- [x] 💻 `ClaimDetail.jsx` sub-tab row 3 → 6: **Checks · Context · Memory · Account &
+  Transaction · Audit Trail · Sub-agents**. Context = the message window + run
+  counters; Memory = episodic facts with per-claim provenance; Sub-agents = a
+  Research/Decisioning breakdown (turns, iteration range, tools used, handoff point)
+  derived client-side from the `/audit` data already polled. `api.js` gains
+  `getAgentContext` / `getAgentMemory` / `getToolCatalog` / `getAgentGraph`.
 
 ### Phase D — Live feel
 
-- [ ] 💻 Fold `/agent-context` into `ClaimDetail`'s existing 2s poll while the claim is
-  active; Memory + Sub-agents re-derive each cycle.
+- [x] 💻 `getAgentContext` + `getAgentMemory` folded into `ClaimDetail`'s existing 2s
+  poll (both degrade to `null` on a transient error rather than red-bannering the
+  view); Sub-agents re-derives each cycle. Context tab tracks a running claim live.
 
 *(Phase E — SSE streaming from `worker.run_claim_agent` — explicitly out of scope.)*
 

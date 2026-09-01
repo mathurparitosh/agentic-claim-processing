@@ -1,6 +1,7 @@
 function tabLabel(tab) {
   if (tab.kind === 'list') return 'Claims';
   if (tab.kind === 'new-claim') return 'New Claim';
+  if (tab.kind === 'agent') return 'Agent';
   return `Claim ${tab.claimId.slice(0, 8)}`;
 }
 

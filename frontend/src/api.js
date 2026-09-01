@@ -67,6 +67,23 @@ export function getAudit(claimId) {
   return request(`/claims/${claimId}/audit`);
 }
 
+/** Agent-tracing views (tracker.md Phase 12). */
+export function getAgentContext(claimId) {
+  return request(`/claims/${claimId}/agent-context`);
+}
+
+export function getAgentMemory(claimId) {
+  return request(`/claims/${claimId}/memory`);
+}
+
+export function getToolCatalog() {
+  return request('/agent/tools');
+}
+
+export function getAgentGraph() {
+  return request('/agent/graph');
+}
+
 export function listAccounts() {
   return request('/accounts');
 }

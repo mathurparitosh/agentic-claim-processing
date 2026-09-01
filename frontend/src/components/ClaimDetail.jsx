@@ -1,13 +1,24 @@
 import { useEffect, useState } from 'react';
-import { getClaim, getContext, getAudit, answerQuestion, checkRecoveryEligibility } from '../api';
+import {
+  getClaim,
+  getContext,
+  getAudit,
+  getAgentContext,
+  getAgentMemory,
+  answerQuestion,
+  checkRecoveryEligibility,
+} from '../api';
 
 const POLL_MS = 2000;
 const ACTIVE_STATUSES = new Set(['pending', 'processing', 'awaiting_input']);
 const RECOVERY_ELIGIBLE_DECISIONS = new Set(['approve', 'inconclusive']);
 const TABS = [
   { id: 'checks', label: 'Checks' },
+  { id: 'agentcontext', label: 'Context' },
+  { id: 'memory', label: 'Memory' },
   { id: 'context', label: 'Account & Transaction' },
   { id: 'audit', label: 'Audit Trail' },
+  { id: 'subagents', label: 'Sub-agents' },
 ];
 
 const DECISION_LABELS = {
@@ -180,6 +191,205 @@ function AuditRow({ entry }) {
   );
 }
 
+function AgentMessageRow({ msg }) {
+  const [expanded, setExpanded] = useState(false);
+  const preview = (msg.content || '').replace(/\s+/g, ' ').trim();
+  const toolCalls = msg.tool_calls || [];
+  return (
+    <li className="agent-msg-row">
+      <button type="button" className="agent-msg-summary" onClick={() => setExpanded((e) => !e)}>
+        <span className={`agent-msg-role role-${msg.role}`}>{msg.role}</span>
+        {toolCalls.length > 0 ? (
+          <span className="agent-msg-toolcall">
+            → {toolCalls.map((tc) => `${tc.name}(${Object.keys(tc.args || {}).join(', ')})`).join(', ')}
+          </span>
+        ) : (
+          <span className="agent-msg-preview">{preview || '(empty)'}</span>
+        )}
+      </button>
+      {expanded && (
+        <pre className="agent-msg-body">
+          {msg.content || '(no text content)'}
+          {toolCalls.length > 0 ? `\n\ntool_calls: ${JSON.stringify(toolCalls, null, 2)}` : ''}
+        </pre>
+      )}
+    </li>
+  );
+}
+
+function ContextTab({ data, loading }) {
+  if (loading && !data) return <p className="muted">Loading…</p>;
+  if (!data) return null;
+  if (data.pending) {
+    return <p className="muted">The agent hasn't started on this claim yet — no message window exists.</p>;
+  }
+  const c = data.counters || {};
+  return (
+    <div className="agent-context-tab">
+      <div className="context-tracing-header">
+        <span><span className="label">messages</span>{data.message_count}</span>
+        <span><span className="label">≈ tokens</span>{data.approx_tokens.toLocaleString()}</span>
+        <span><span className="label">iteration</span>{c.iteration ?? '—'} / {c.max_iterations}</span>
+        <span><span className="label">no-progress</span>{c.iterations_without_progress ?? '—'} / {c.no_progress_limit}</span>
+        <span><span className="label">questions</span>{c.questions_asked ?? '—'}</span>
+        {data.active_agent && (
+          <span>
+            <span className="label">active</span>
+            <span className={`sub-agent-pill sub-agent-${data.active_agent}`}>{data.active_agent}</span>
+          </span>
+        )}
+        <span>
+          <span className="label">next</span>
+          {data.next_nodes.length ? data.next_nodes.join(', ') : data.claim_status === 'completed' ? 'done' : '—'}
+        </span>
+        <span><span className="label">model</span><span className="audit-model">{data.model}</span></span>
+      </div>
+      <p className="context-window-note">
+        The exact message list handed to the model on its next turn — it grows every iteration. The
+        Audit Trail tab is the durable record of the run; this is the working memory that gets sent.
+      </p>
+      <ul className="agent-msg-list">
+        {data.messages.map((m, i) => (
+          <AgentMessageRow key={i} msg={m} />
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function MemoryTab({ data, loading }) {
+  if (loading && !data) return <p className="muted">Loading…</p>;
+  if (!data) return null;
+  if (!data.account_id) {
+    return <p className="memory-empty">This claim has no <code>account_id</code>, so there are no episodic facts.</p>;
+  }
+  if (!data.facts.length) {
+    return (
+      <p className="memory-empty">
+        No episodic facts stored for account <code>{data.account_id}</code> yet. The run writes these
+        after account-profile lookups; they carry into later claims on the same account.
+      </p>
+    );
+  }
+  return (
+    <div className="agent-memory-tab">
+      <p className="context-window-note">
+        Cross-claim memory for account <code>{data.account_id}</code>. Read at init, upserted after
+        account lookups — each fact shows which claim last wrote it.
+      </p>
+      <ul className="agent-msg-list">
+        {data.facts.map((f) => (
+          <li className="memory-row" key={f.fact_key}>
+            <div className="memory-row-head">
+              <span className="memory-key">{f.fact_key}</span>
+              <span className={`memory-origin-pill ${f.written_by_this_claim ? 'memory-origin-this' : ''}`}>
+                {f.written_by_this_claim
+                  ? 'written by this claim'
+                  : `from claim ${(f.origin_claim_id || '').slice(0, 8) || 'unknown'}`}
+              </span>
+              {f.source_tool && <span className="audit-model">{f.source_tool}</span>}
+            </div>
+            <pre className="memory-value">{JSON.stringify(f.fact_value, null, 2)}</pre>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+const SUBAGENT_ROLE = {
+  research:
+    'Grounding + Retrieval tools only. Gathers evidence for evidence-type checks; never judges or decides.',
+  decisioning:
+    'Computation tools + ask_human + write_determination. Resolves the remaining checks, escalates, calls the close.',
+};
+
+function deriveSubAgents(entries) {
+  if (!entries) return null;
+  const thinks = entries.filter((e) => e.event_type === 'agent_think');
+  if (!thinks.length) return null;
+  const calls = entries.filter((e) => e.event_type === 'tool_call');
+  const build = (name) => {
+    const t = thinks.filter((e) => e.payload?.sub_agent === name);
+    const c = calls.filter((e) => e.payload?.sub_agent === name);
+    const iters = t.map((e) => e.payload?.iteration).filter((n) => n != null);
+    return {
+      name,
+      turns: t.length,
+      iterationRange: iters.length ? [Math.min(...iters), Math.max(...iters)] : null,
+      tools: [...new Set(c.map((e) => e.payload?.tool || e.event_subtype).filter(Boolean))],
+      model: t[0]?.payload?.model || null,
+    };
+  };
+  const handoff = thinks.find((e) => e.payload?.role_switch);
+  return {
+    research: build('research'),
+    decisioning: build('decisioning'),
+    handoff: handoff ? { iteration: handoff.payload?.iteration, at: handoff.created_at } : null,
+    lastThink: thinks[thinks.length - 1]?.payload?.sub_agent || null,
+  };
+}
+
+function SubAgentColumn({ agent, active }) {
+  const range = agent.iterationRange;
+  return (
+    <div className={`subagent-col ${active ? 'subagent-col-active' : ''}`}>
+      <h3>
+        <span className={`sub-agent-pill sub-agent-${agent.name}`}>{agent.name}</span>
+        {active && ' · active'}
+      </h3>
+      <p className="subagent-stat">{SUBAGENT_ROLE[agent.name]}</p>
+      <p className="subagent-stat"><span className="muted">turns</span>{agent.turns}</p>
+      <p className="subagent-stat">
+        <span className="muted">iterations</span>
+        {range ? (range[0] === range[1] ? range[0] : `${range[0]}–${range[1]}`) : '—'}
+      </p>
+      {agent.model && (
+        <p className="subagent-stat"><span className="muted">model</span><span className="audit-model">{agent.model}</span></p>
+      )}
+      <p className="subagent-stat"><span className="muted">tools used</span></p>
+      <ul className="subagent-turns">
+        {agent.tools.length ? (
+          agent.tools.map((t) => <li className="subagent-turn" key={t}>{t}</li>)
+        ) : (
+          <li className="subagent-turn muted">none</li>
+        )}
+      </ul>
+    </div>
+  );
+}
+
+function SubAgentsTab({ audit, activeAgent }) {
+  const data = deriveSubAgents(audit);
+  if (!data) return <p className="muted">No agent reasoning turns recorded yet.</p>;
+  if (data.research.turns === 0 && data.decisioning.turns === 0) {
+    return (
+      <p className="muted">This run's audit trail has no research / decisioning turns (it may predate the orchestrator).</p>
+    );
+  }
+  const active = activeAgent || data.lastThink;
+  return (
+    <div className="agent-subagents-tab">
+      <p className="context-window-note">
+        Research runs first, then hands off <em>permanently</em> to Decisioning once research-owned
+        checks resolve or its iteration budget runs out. Iteration / no-progress / question counters
+        are global across both.
+      </p>
+      <div className="subagent-grid">
+        <SubAgentColumn agent={data.research} active={active === 'research'} />
+        <SubAgentColumn agent={data.decisioning} active={active === 'decisioning'} />
+      </div>
+      <p className="subagent-handoff">
+        {data.handoff
+          ? `Handoff to Decisioning at iteration ${data.handoff.iteration} (${new Date(
+              data.handoff.at,
+            ).toLocaleTimeString()}).`
+          : 'No handoff yet — still in the Research phase.'}
+      </p>
+    </div>
+  );
+}
+
 function SummaryPane({ claim, context, loading }) {
   const account = context?.account;
   const transaction = context?.transaction;
@@ -240,6 +450,8 @@ export default function ClaimDetail({ claimId, onAnswered }) {
   const [claim, setClaim] = useState(null);
   const [context, setContext] = useState(null);
   const [audit, setAudit] = useState(null);
+  const [agentContext, setAgentContext] = useState(null);
+  const [memory, setMemory] = useState(null);
   const [tab, setTab] = useState('checks');
   const [error, setError] = useState('');
   const [answerText, setAnswerText] = useState('');
@@ -253,10 +465,19 @@ export default function ClaimDetail({ claimId, onAnswered }) {
 
     async function poll() {
       try {
-        const [claimData, auditData] = await Promise.all([getClaim(claimId), getAudit(claimId)]);
+        // agent-context / memory degrade to null on error (transient checkpoint read,
+        // etc.) rather than red-bannering the whole detail view.
+        const [claimData, auditData, agentCtx, mem] = await Promise.all([
+          getClaim(claimId),
+          getAudit(claimId),
+          getAgentContext(claimId).catch(() => null),
+          getAgentMemory(claimId).catch(() => null),
+        ]);
         if (cancelled) return;
         setClaim(claimData);
         setAudit(auditData.entries);
+        if (agentCtx) setAgentContext(agentCtx);
+        if (mem) setMemory(mem);
         setError('');
         if (ACTIVE_STATUSES.has(claimData.status)) {
           timer = setTimeout(poll, POLL_MS);
@@ -269,6 +490,8 @@ export default function ClaimDetail({ claimId, onAnswered }) {
     setClaim(null);
     setContext(null);
     setAudit(null);
+    setAgentContext(null);
+    setMemory(null);
     setTab('checks');
     setRecoveryStatus('idle');
     poll();
@@ -394,8 +617,11 @@ export default function ClaimDetail({ claimId, onAnswered }) {
             ))}
           </ul>
         )}
+        {tab === 'agentcontext' && <ContextTab data={agentContext} loading={!agentContext} />}
+        {tab === 'memory' && <MemoryTab data={memory} loading={!memory} />}
         {tab === 'context' && <ContextPanel context={context} loading={!context} />}
         {tab === 'audit' && <AuditPanel entries={audit} loading={!audit} />}
+        {tab === 'subagents' && <SubAgentsTab audit={audit} activeAgent={agentContext?.active_agent} />}
 
         {error && <p className="error">{error}</p>}
       </div>
