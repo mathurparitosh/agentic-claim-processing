@@ -30,6 +30,7 @@ Step-by-step guide and checklist for deploying this repo to a single Linux VM
 ## 0 · Before you start — gather these
 
 - [ ] SSH access to the server as a **sudo-capable** user, plus its IP or a domain name pointed at it
+  - If the VM already runs another site, plan for a **dedicated subdomain** (`claims.<yourdomain>`) — see *Sharing the server with another site* below
 - [ ] **OpenAI API key** with billing enabled (`sk-…`) — used for the agent LLM *and* embeddings
 - [ ] **Qdrant Cloud** cluster URL + API key (the vector store is managed, not self-hosted here)
 - [ ] **LangSmith** API key + project name — optional, tracing only
@@ -235,6 +236,61 @@ sudo systemctl enable --now claim-assistant
 
 ---
 
+## Sharing the server with another site
+
+**Skip this if the VM is dedicated to Claim Assistant.** If it already serves another
+site, run Claim Assistant on **its own subdomain** (`claims.<yourdomain>`) with its own
+Nginx `server` block and its own TLS cert. Nginx routes each request to the block whose
+`server_name` matches the request's `Host` header, so two apps coexist cleanly — as long
+as you don't lean on `default_server`:
+
+- **Every `server` block names a distinct hostname.** No two blocks share a `server_name`.
+- **`default_server` is only the fallback** for a request whose `Host` matches nothing
+  (e.g. someone hitting the bare IP). Give each real app an exact-match `server_name` and
+  it never depends on which block is the default. Do **not** add `default_server` to the
+  Claim Assistant block, and do **not** remove it from the other site's block.
+- **Only Claim Assistant runs on its port.** The backend is on `127.0.0.1:8000`; if the
+  other site's backend also uses 8000, change one (`--port` in Appendix B + the
+  `proxy_pass` in Appendix C).
+
+**Setup**
+
+1. **DNS** — add an `A` record `claims` → this server's public IP; confirm it before touching Nginx:
+   ```bash
+   dig +short claims.example.com          # must print the server's IP
+   ```
+2. **Nginx block** — create `/etc/nginx/sites-available/claim-assistant` from Appendix C
+   with `server_name claims.example.com;`, and enable it **without touching the other site**:
+   ```bash
+   sudo ln -sf /etc/nginx/sites-available/claim-assistant /etc/nginx/sites-enabled/
+   # do NOT `rm` sites-enabled/default if the other site is served from it
+   sudo chmod o+x /opt /opt/claim-assistant /opt/claim-assistant/frontend
+   sudo nginx -t && sudo systemctl reload nginx
+   ```
+3. **Confirm each hostname resolves to its own block** before adding TLS:
+   ```bash
+   curl -sI http://127.0.0.1/ -H 'Host: claims.example.com' | head -3
+   sudo nginx -T | grep -nE 'server_name|listen |ssl_certificate '   # every server_name unique
+   ```
+4. **TLS for the subdomain only** — `sudo certbot --nginx -d claims.example.com` (step 11).
+   Certbot edits **only** the block that matches `-d`, adding its `listen 443 ssl` +
+   `80 → 443` redirect; the other site's blocks and cert are untouched.
+5. **Verify isolation:**
+   ```bash
+   curl -sI https://claims.example.com/       # Claim Assistant
+   curl -sI https://the-other-site.example/   # unchanged
+   ```
+
+> **`https://claims.example.com` still shows the other site?** The `Host` isn't matching
+> your block. `sudo nginx -T | grep -A15 'server_name claims.example.com'` — the block
+> must be loaded and (after certbot) have a `443` section; no other block may also list
+> that name. `sudo systemctl reload nginx` (not just `nginx -t`), then retry. A common
+> cause is the other site's block being `listen 443 ssl default_server` while yours has
+> **no** `443` block yet — every HTTPS request then falls to the other site until certbot
+> gives Claim Assistant its own `443` block.
+
+---
+
 ## 9 · Nginx — static frontend + API proxy
 
 Full server block in **Appendix C**.
@@ -242,16 +298,19 @@ Full server block in **Appendix C**.
 ```bash
 sudo nano /etc/nginx/sites-available/claim-assistant   # paste Appendix C
 sudo ln -sf /etc/nginx/sites-available/claim-assistant /etc/nginx/sites-enabled/
+# Dedicated box only — this disables Nginx's stock welcome page. On a shared box, leave
+# sites-enabled/default alone (the other site may be served from it).
 sudo rm -f /etc/nginx/sites-enabled/default
 # let nginx (www-data) traverse into the app dir to read dist/
 sudo chmod o+x /opt /opt/claim-assistant /opt/claim-assistant/frontend
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
-- [ ] `server_name` set to your domain **or** the server IP
+- [ ] `server_name` is a hostname you control — a **dedicated subdomain** if the box runs other sites (see the section above), the domain or the server IP if it's dedicated
+- [ ] No `default_server` on the Claim Assistant block unless the box is dedicated
 - [ ] `nginx -t` passes
-- [ ] `curl -s http://SERVER_IP/ | grep -o '<title>.*</title>'` returns the app's HTML (static bundle served)
-- [ ] `curl -s -o /dev/null -w '%{http_code}\n' http://SERVER_IP/api/claims` → **401** (proxy + auth reaching the backend)
+- [ ] `curl -s https://claims.example.com/ | grep -o '<title>.*</title>'` returns the app's HTML (static bundle served)
+- [ ] `curl -s -o /dev/null -w '%{http_code}\n' https://claims.example.com/api/claims` → **401** (proxy + auth reaching the backend)
 - [ ] `location /api/` uses `proxy_pass http://127.0.0.1:8000/;` **with the trailing slash** (strips the `/api` prefix)
 - [ ] SPA deep links work — `location / { try_files $uri /index.html; }`
 
@@ -277,10 +336,11 @@ Only if you have a real domain pointed at the server.
 
 ```bash
 sudo apt -y install certbot python3-certbot-nginx
-sudo certbot --nginx -d claims.example.com
+sudo certbot --nginx -d claims.example.com     # use your app's hostname(s)
 ```
 
-- [ ] `certbot` obtained a cert and edited the Nginx block to add `:443` + redirect
+- [ ] `certbot` obtained a cert and edited **only** the block matching `-d` to add `:443` + redirect
+- [ ] On a shared box: the other site's `server` blocks and cert are untouched (`sudo nginx -T | grep ssl_certificate`)
 - [ ] `sudo certbot renew --dry-run` succeeds (auto-renew timer active)
 - [ ] Site loads over `https://` with a valid padlock
 
@@ -288,7 +348,7 @@ sudo certbot --nginx -d claims.example.com
 
 ## 12 · End-to-end smoke test
 
-Open `http://SERVER_IP/` (or your https domain) in a browser:
+Open `https://claims.example.com/` (your app's hostname) in a browser:
 
 - [ ] Password gate appears → pick **Admin** (or enter `admin` + `AUTH_PASSWORD`) → lands on the **Claims** list
 - [ ] Log out → pick **Processor** → the **Agent** button and the Context / Memory / Sub-agents claim tabs are gone
@@ -407,10 +467,21 @@ WantedBy=multi-user.target
 
 ## Appendix C — `/etc/nginx/sites-available/claim-assistant`
 
+`server_name` is the one line to get right:
+
+- **Dedicated box:** your domain (`claims.example.com`) or the bare `SERVER_IP`. You may
+  add `default_server` to the `listen` lines so IP hits land here too.
+- **Shared box (another site on the same VM):** a **dedicated subdomain**
+  (`claims.<yourdomain>`) that no other `server` block names, and **no `default_server`** —
+  see *Sharing the server with another site* above.
+
+Certbot rewrites `listen 80;` into a `listen 443 ssl` block + an `80 → 443` redirect for
+this `server_name`; leave `listen 80;` here and run step 11.
+
 ```nginx
 server {
     listen 80;
-    server_name claims.example.com;   # or the bare SERVER_IP
+    server_name claims.example.com;   # dedicated subdomain on a shared box; domain or IP if dedicated
 
     root /opt/claim-assistant/frontend/dist;
     index index.html;
@@ -457,7 +528,10 @@ server {
 | **502 Bad Gateway** from Nginx | Backend not listening. `systemctl status claim-assistant`, `curl localhost:8000/`, `journalctl -u claim-assistant -n 100`. |
 | Nginx **403 Forbidden** / blank page | `www-data` can't traverse to `dist/`. `sudo chmod o+x /opt /opt/claim-assistant /opt/claim-assistant/frontend` (or move `dist` under `/var/www`). |
 | Frontend loads, but every API call is **404** | Built without `VITE_API_BASE_URL=/api`, or Nginx `location /api/` missing / `proxy_pass` has no trailing slash. Rebuild, `nginx -t`, reload. |
-| Every API call **401** even with the right password | `AUTH_PASSWORD` in `.env.local` ≠ what you typed; trailing newline/space in the env file; service not restarted after editing `.env.local`. |
+| **`https://claims.example.com` serves a *different* site** on a shared box | Nginx virtual-host mismatch — the `Host` matches nothing, or the other site's block, so the request falls to `default_server`. See *Sharing the server with another site*: distinct `server_name` per block, Claim Assistant gets its own `443` block via certbot, no reliance on `default_server`. |
+| Login returns **`{"detail":"invalid credentials"}`** (a *401*, but the backend is reachable — `/api/` health is 200) | The bearer token ≠ `AUTH_PASSWORD` *as the running service loaded it*. Check for quotes/trailing space (`sudo -u claimsvc grep AUTH_PASSWORD .env.local \| cat -A`), a `systemd` `Environment=` override (`systemctl show claim-assistant -p Environment`), or an edit made after start (`sudo systemctl restart claim-assistant`). Test directly: `curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer <pw>" -H "X-Username: admin" http://127.0.0.1:8000/whoami`. If you use the login screen's quick-pick buttons, `VITE_DEMO_PASSWORD` (baked in at build) must equal `AUTH_PASSWORD` — otherwise type the password. |
+| Login returns **`{"detail":"unknown user 'x'"}`** | Username must be `admin`, `processor`, or `customer` (lowercase). |
+| Every API call **401** with `{"detail":"Not authenticated"}` | The `Authorization: Bearer …` header isn't arriving — check the frontend was built with `VITE_API_BASE_URL=/api` and Nginx isn't stripping the header. |
 | Claim sticks on **processing** forever | Agent hit an exception (OpenAI/Qdrant unreachable from the server, bad key, rate limit). `journalctl -u claim-assistant -f` while submitting; check outbound HTTPS egress. |
 | `psql: FATAL: Peer authentication failed` | Connect over TCP with the password: `psql "postgresql://claims_app:...@localhost:5432/claims"`, not `psql -U claims_app`. |
 | `permission denied for schema public` when applying `schema.sql` | The DB isn't owned by `claims_app`. `ALTER DATABASE claims OWNER TO claims_app;` then reconnect. |
