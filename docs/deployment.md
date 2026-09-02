@@ -465,6 +465,77 @@ WantedBy=multi-user.target
 
 ---
 
+## Appendix D — Deploying the Title Case claim updates
+
+These changes persist claim types and reasons as Title Case, for example `Billing
+Dispute` and `Duplicate Charge`. The application still accepts legacy snake_case
+values and normalizes them internally for agent routing.
+
+Run these commands on the server after SSHing in:
+
+```bash
+cd /opt/claim-assistant
+sudo -u claimsvc git pull --ff-only origin main
+
+# Install any backend dependency changes.
+sudo -u claimsvc backend/.venv/bin/pip install -r backend/requirements.txt
+
+# Migrate existing claims from snake_case to the new persisted Title Case values.
+# Take a database backup before running the update.
+sudo -u postgres pg_dump claims > /tmp/claims-before-title-case-$(date +%Y%m%d%H%M%S).sql
+psql "$DATABASE_URL" <<'SQL'
+BEGIN;
+
+UPDATE claims
+SET claim_type = CASE claim_type
+    WHEN 'fraud' THEN 'Fraud'
+    WHEN 'billing_dispute' THEN 'Billing Dispute'
+    ELSE claim_type
+  END;
+
+UPDATE claims
+SET claim_payload = jsonb_set(claim_payload, '{reason}', to_jsonb(
+  CASE claim_payload ->> 'reason'
+    WHEN 'unauthorized_transaction' THEN 'Unauthorized Transaction'
+    WHEN 'not_recognized' THEN 'Not Recognized'
+    WHEN 'duplicate_charge' THEN 'Duplicate Charge'
+    WHEN 'other' THEN 'Other'
+    WHEN 'merchandise_services_not_received' THEN 'Merchandise/Services Not Received'
+    WHEN 'not_as_described_or_defective' THEN 'Not As Described Or Defective'
+    WHEN 'cancelled_recurring_transaction' THEN 'Cancelled Recurring Transaction'
+    WHEN 'credit_not_processed' THEN 'Credit Not Processed'
+    ELSE claim_payload ->> 'reason'
+  END
+), false)
+WHERE claim_payload ? 'reason';
+
+COMMIT;
+SQL
+
+# Build the frontend with the production API path.
+cd frontend
+sudo -u claimsvc npm ci
+sudo -u claimsvc env VITE_API_BASE_URL=/api npm run build
+cd ..
+
+sudo systemctl restart claim-assistant
+sudo systemctl reload nginx
+sudo systemctl --no-pager status claim-assistant
+```
+
+Verify the migration:
+
+```bash
+psql "$DATABASE_URL" -c "SELECT DISTINCT claim_type FROM claims ORDER BY 1;"
+psql "$DATABASE_URL" -c "SELECT DISTINCT claim_payload->>'reason' AS reason FROM claims ORDER BY 1;"
+```
+
+Expected values include `Fraud`, `Billing Dispute`, `Duplicate Charge`, and the
+other Title Case reasons configured in the claim form. Existing audit records are
+historical evidence; new audit records use the Title Case claim type.
+
+---
+
 ## Appendix C — `/etc/nginx/sites-available/claim-assistant`
 
 `server_name` is the one line to get right:

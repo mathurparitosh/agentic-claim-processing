@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from . import db
 from . import worker
 from .agent import ledger, recovery, tracing
+from .agent.checks import storage_claim_type, storage_reason
 from .auth import Identity, require_admin, require_auth
 
 app = FastAPI()
@@ -81,6 +82,10 @@ def create_claim(claim: ClaimIn, background_tasks: BackgroundTasks, identity: Id
     """Persist a new claim and start the background agent run. `filed_by` records the
     submitting user so a customer can be shown only their own claims."""
     claim_id = str(uuid4())
+    claim_type = storage_claim_type(claim.claim_type)
+    claim_payload = dict(claim.claim_payload)
+    if "reason" in claim_payload:
+        claim_payload["reason"] = storage_reason(claim_payload["reason"])
 
     with db.get_connection() as conn:
         with conn.cursor() as cur:
@@ -89,12 +94,12 @@ def create_claim(claim: ClaimIn, background_tasks: BackgroundTasks, identity: Id
                 INSERT INTO claims (id, claim_type, claim_payload, status, filed_by)
                 VALUES (%s, %s, %s, 'pending', %s)
                 """,
-                (claim_id, claim.claim_type, json.dumps(claim.claim_payload), identity.username),
+                (claim_id, claim_type, json.dumps(claim_payload), identity.username),
             )
     ledger.log_audit(
         claim_id,
         "claim_submitted",
-        {"claim_type": claim.claim_type, "claim_payload": claim.claim_payload, "filed_by": identity.username},
+        {"claim_type": claim_type, "claim_payload": claim_payload, "filed_by": identity.username},
         "human",
     )
     background_tasks.add_task(worker.run_claim_agent, claim_id)
@@ -111,8 +116,18 @@ def list_claims(limit: int = 50, identity: Identity = Depends(require_auth)):
         with conn.cursor() as cur:
             cur.execute(
                 f"""
-                SELECT id, claim_type, status, decision, submitted_at, last_updated, filed_by
-                FROM claims {where} ORDER BY submitted_at DESC LIMIT %s
+                  SELECT c.id, c.claim_type, c.status, c.decision, c.submitted_at, c.last_updated, c.filed_by,
+                      c.claim_payload ->> 'reason' AS reason,
+                      c.claim_payload ->> 'account_id' AS account_id,
+                      a.member_name,
+                      t.merchant,
+                      t.amount
+                  FROM claims c
+                  LEFT JOIN account_profiles a ON a.account_id = c.claim_payload ->> 'account_id'
+                  LEFT JOIN transactions t
+                    ON t.account_id = c.claim_payload ->> 'account_id'
+                   AND t.transaction_ref = c.claim_payload ->> 'disputed_transaction_id'
+                  {where} ORDER BY c.submitted_at DESC LIMIT %s
                 """,
                 params,
             )

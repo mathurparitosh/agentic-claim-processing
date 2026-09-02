@@ -11,6 +11,12 @@ const STATUS_LABELS = {
   completed: 'Completed',
 };
 
+function displayValue(value) {
+  return value
+    ? value.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase())
+    : '—';
+}
+
 export default function ClaimList({ openClaimIds, onSelect, refreshToken, role }) {
   const [claims, setClaims] = useState([]);
   const [error, setError] = useState('');
@@ -54,7 +60,18 @@ export default function ClaimList({ openClaimIds, onSelect, refreshToken, role }
             onClick={() => onSelect(c.id)}
           >
             <div className="claim-list-row">
-              <span className="claim-type">{c.claim_type}</span>
+              <div className="claim-list-header-info">
+                <div className="claim-type">
+                  {displayValue(c.claim_type)}
+                  <span className="claim-reason">{displayValue(c.reason)}</span>
+                </div>
+                <div className="claim-list-meta">
+                  <span>Account ID: {c.account_id || '—'}</span>
+                  <span>Name: {c.member_name || '—'}</span>
+                  <span>Merchant: {c.merchant || '—'}</span>
+                  <span>Amount: {c.amount != null ? `$${Number(c.amount).toFixed(2)}` : '—'}</span>
+                </div>
+              </div>
               <span className={`status-badge status-${c.status}`}>
                 {STATUS_LABELS[c.status] || c.status}
                 {ACTIVE_STATUSES.has(c.status) && <span className="pulse" />}

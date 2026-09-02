@@ -112,7 +112,7 @@ class TestClaimLifecycle:
         assert resp.status_code == 200
         data = resp.json()
         assert data["id"] == claim_id
-        assert data["claim_type"] == "fraud"
+        assert data["claim_type"] == "Fraud"
 
     def test_invalid_claim_id(self, client, auth_headers):
         """GET /claims/{id} with invalid id returns 404."""

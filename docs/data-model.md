@@ -26,8 +26,8 @@ updated by `backend/worker.py` and `backend/agent/ledger.py`'s `finalize_decisio
 | Column | Notes |
 |---|---|
 | `id` (UUID) | Primary key. Also used verbatim as the LangGraph `thread_id`. |
-| `claim_type` | `fraud` or `billing_dispute`. |
-| `claim_payload` (JSONB) | `account_id`, `disputed_transaction_id`, `reason`, `filed_at`. |
+| `claim_type` | `Fraud` or `Billing Dispute`. |
+| `claim_payload` (JSONB) | `account_id`, `disputed_transaction_id`, Title Case `reason`, `filed_at`. |
 | `status` | `pending → processing → awaiting_input ↔ processing → completed` (or `failed`). |
 | `decision` / `decision_reason` | `approve` \| `deny` \| `inconclusive`, filled only at finalize. |
 | `pending_question` (JSONB) | Set while `awaiting_input` from the `ask_human` interrupt payload; cleared on answer. |

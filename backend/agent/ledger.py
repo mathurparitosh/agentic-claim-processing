@@ -7,11 +7,11 @@ decision columns on `claims` -- keeps the append-only / traceability guarantees
 import json
 
 from .. import db
-from .checks import REQUIRED_CHECKS, compute_decision
+from .checks import compute_decision, required_checks
 
 
-def init_checks(claim_id: str, claim_type: str) -> dict:
-    required = REQUIRED_CHECKS[claim_type]
+def init_checks(claim_id: str, claim_type: str, claim_payload: dict | None = None) -> dict:
+    required = required_checks(claim_type, claim_payload)
     with db.get_connection() as conn:
         with conn.cursor() as cur:
             for name in required:

@@ -11,6 +11,7 @@ from langgraph.types import Command
 from . import db
 from .agent.graph import initial_state
 from .agent.orchestrator import build_orchestrator_graph
+from .agent.checks import normalize_claim_type
 
 
 def build_claim_graph(checkpointer=None):
@@ -51,7 +52,7 @@ def run_claim_agent(claim_id: str):
     with PostgresSaver.from_conn_string(db.DATABASE_URL) as checkpointer:
         graph = build_claim_graph(checkpointer)
         config = {"configurable": {"thread_id": claim_id}}
-        result = graph.invoke(initial_state(claim_id, row["claim_type"], row["claim_payload"]), config=config)
+        result = graph.invoke(initial_state(claim_id, normalize_claim_type(row["claim_type"]), row["claim_payload"]), config=config)
 
     _handle_graph_result(claim_id, result)
 

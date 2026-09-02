@@ -63,6 +63,12 @@ const DECISION_LABELS = {
   inconclusive: 'Inconclusive',
 };
 
+function displayValue(value) {
+  return value
+    ? value.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase())
+    : '—';
+}
+
 function CheckRow({ check }) {
   const [expanded, setExpanded] = useState(false);
   return (
@@ -464,7 +470,16 @@ function SummaryPane({ claim, context, loading }) {
 
       <div className="summary-section">
         <h3>Dispute type</h3>
-        <p className="summary-value">{disputeType ? disputeType.replaceAll('_', ' ') : '—'}</p>
+        <dl className="context-fields">
+          <dt>Reason</dt>
+          <dd>{displayValue(disputeType)}</dd>
+          <dt>Filed at</dt>
+          <dd>
+            {claim.claim_payload?.filed_at
+              ? new Date(claim.claim_payload.filed_at).toLocaleString()
+              : '—'}
+          </dd>
+        </dl>
       </div>
     </aside>
   );
@@ -597,7 +612,7 @@ export default function ClaimDetail({ claimId, role, onAnswered }) {
         <h2>Claim detail</h2>
         <div className="claim-meta">
           <div><span className="label">ID</span> {claim.id}</div>
-          <div><span className="label">Type</span> {claim.claim_type}</div>
+          <div><span className="label">Type</span> {displayValue(claim.claim_type)}</div>
           <div><span className="label">Status</span> <span className={`status-badge status-${claim.status}`}>{claim.status}</span></div>
           <div><span className="label">Submitted</span> {new Date(claim.submitted_at).toLocaleString()}</div>
         </div>

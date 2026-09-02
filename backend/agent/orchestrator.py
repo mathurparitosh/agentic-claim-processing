@@ -35,6 +35,7 @@ from langchain_core.messages import SystemMessage, ToolMessage
 from langgraph.graph import END, START, StateGraph
 
 from . import episodic, ledger
+from .checks import storage_claim_type
 from .graph import (
     MAX_ITERATIONS,
     NO_PROGRESS_LIMIT,
@@ -141,15 +142,7 @@ def _build_system_prompt(header: str, claim_type: str, claim_payload: dict, chec
 
 def init_node(state: OrchestratorState) -> dict:
     claim_id, claim_type, payload = state["claim_id"], state["claim_type"], state["claim_payload"]
-    checks = ledger.init_checks(claim_id, claim_type)
-
-    # Deterministic pre-resolution: duplicate_charge_check only applies when the claim's
-    # own stated reason is 'duplicate_charge' -- submitted data, not agent inference,
-    # preserving determinism (requirements.md §6). Mirrors graph.py's init_node exactly.
-    if claim_type == "billing_dispute" and payload.get("reason") != "duplicate_charge":
-        detail = {"note": "not applicable: claim reason is not duplicate_charge"}
-        checks["duplicate_charge_check"] = {"status": "PASS", "detail": detail}
-        ledger.update_check(claim_id, "duplicate_charge_check", "PASS", detail)
+    checks = ledger.init_checks(claim_id, claim_type, payload)
 
     account_id = payload.get("account_id")
     known_facts = episodic.get_facts(account_id, "account") if account_id else {}
@@ -158,7 +151,7 @@ def init_node(state: OrchestratorState) -> dict:
         claim_id,
         "run_started",
         {
-            "claim_type": claim_type,
+            "claim_type": storage_claim_type(claim_type),
             "claim_payload": payload,
             "agent_mode": "orchestrator",
             "model": active_model_name(),

@@ -95,8 +95,8 @@ the concrete mapping the LangGraph agent, synthetic-data fixtures, and (later) t
 Phase 9 eval set are all built against. Two claim types, matching requirements.md §1's
 "billing dispute or fraud claims" framing.
 
-Each check is deterministically required for its claim type (looked up by
-`claim_type`, not LLM-inferred) — the check *ledger* is initialized with all required
+Each check is deterministically required for its claim type (looked up by the persisted
+Title Case `claim_type`, normalized internally, not LLM-inferred) — the check *ledger* is initialized with all required
 checks at UNKNOWN when a run starts. What the ReAct loop actually reasons about is
 *which tool to call next* to resolve each still-UNKNOWN/BLOCKED check, not which
 checks apply in the first place. This keeps "classification" auditable/deterministic
@@ -105,12 +105,27 @@ determinism-of-decisioning requirement.
 
 ### `billing_dispute`
 
+All billing disputes run these shared checks:
+
 | Check | Tool category | Resolves by |
 |---|---|---|
 | `transaction_exists` | Grounding | Disputed transaction is found in the account's transaction history |
-| `duplicate_charge_check` | Computation | Same amount/merchant charged twice within a short window (only decisive when dispute reason is `duplicate_charge`) |
 | `policy_dispute_window` | Retrieval | Retrieve the applicable dispute-filing-window policy; a retrieved, citable policy satisfies the check (see note below — a real day-count comparison against the claim's filed date is deferred) |
 | `account_standing` | Grounding | Account is not already flagged for dispute-process abuse |
+
+The submitted billing-dispute reason adds one deterministic reason-specific check:
+
+| Reason | Check | Tool category | Resolves by |
+|---|---|---|---|
+| `duplicate_charge` | `duplicate_charge_check` | Computation | Same amount/merchant charged twice within a short window |
+| `merchandise_services_not_received` | `goods_services_delivery_check` | Human-in-the-loop | Evidence that goods/services were not delivered or the event/service was cancelled |
+| `not_as_described_or_defective` | `goods_services_quality_check` | Human-in-the-loop | Evidence that the goods/services were defective or materially misrepresented |
+| `cancelled_recurring_transaction` | `recurring_cancellation_check` | Human-in-the-loop | Cancellation date/method and evidence that the disputed charge posted afterward |
+| `credit_not_processed` | `refund_credit_check` | Human-in-the-loop | Evidence of the promised refund/return credit and whether it posted |
+
+The four evidence checks currently use `ask_human` because the synthetic schema has no
+delivery, cancellation, merchant-contact, or refund-credit tables. They are explicit
+extension points for deterministic evidence tools in a later phase.
 
 ### `fraud`
 
