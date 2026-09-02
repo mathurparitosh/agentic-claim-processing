@@ -11,7 +11,7 @@ venv/
 .ipynb_checkpoints/
 softwares/
 .run/
-
+/reqs/
 # logs
 *.log
 
