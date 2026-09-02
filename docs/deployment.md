@@ -514,6 +514,13 @@ SQL
 
 # Build the frontend with the production API path.
 cd frontend
+# Previous deployments may have created dist or node_modules as root. Make them
+# writable by the service user before npm cleans or replaces files.
+for path in dist node_modules; do
+  if [[ -e "$path" ]]; then
+    sudo chown -R claimsvc:claimsvc "$path"
+  fi
+done
 sudo -u claimsvc npm ci
 sudo -u claimsvc env VITE_API_BASE_URL=/api npm run build
 cd ..
