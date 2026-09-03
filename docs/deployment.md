@@ -522,7 +522,7 @@ for path in dist node_modules; do
   fi
 done
 sudo -u claimsvc npm ci
-sudo -u claimsvc env VITE_API_BASE_URL=/api npm run build
+sudo -u claimsvc env VITE_API_BASE_URL=/api VITE_DEMO_PASSWORD=claimagent npm run build
 cd ..
 
 sudo systemctl restart claim-assistant

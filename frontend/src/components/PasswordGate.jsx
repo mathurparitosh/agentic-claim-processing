@@ -4,7 +4,7 @@ import { setStoredPassword, setStoredUser, checkAuth, USERS } from '../api';
 // Demo affordance: all three users share AUTH_PASSWORD, so the quick-pick buttons can
 // prefill both fields. Override at build time with VITE_DEMO_PASSWORD='' to disable
 // (the buttons then only prefill the username and you type the password).
-const DEMO_PASSWORD = import.meta.env.VITE_DEMO_PASSWORD ?? 'password';
+const DEMO_PASSWORD = import.meta.env.VITE_DEMO_PASSWORD ?? 'claimagent';
 
 const USER_BLURB = {
   admin: 'Everything — claims, the Agent tab, and the per-claim tracing tabs.',
